@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: svc-detect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: svc-detect
+  template:
+    metadata:
+      labels:
+        app: svc-detect
+    spec:
+      containers:
+      - name: svc-detect
+        image: 192.168.1.169:5000/svc-detect:v1
+        imagePullPolicy: Always

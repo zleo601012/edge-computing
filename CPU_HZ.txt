@@ -1,0 +1,16 @@
+pi1,pi4:
+scaling_max_freq = 1800000 kHz → 最高 1.8 GHz
+scaling_min_freq = 600000 kHz → 最低 0.6 GHz
+scaling_governor = ondemand → 按负载动态调频：空闲就降频，忙了就升频
+pi2,pi3:
+最高频率：2400000 kHz ≈ 2.4 GHz
+最低频率：1500000 kHz ≈ 1.5 GHz
+调频策略：ondemand，按负载在 1.5–2.4 GHz 间动态调整
+a1:
+最高频率：2400000 kHz ≈ 2.4 GHz
+最低频率：800000 kHz ≈ 0.8 GHz
+调频策略：schedutil（x86 常见），由 Linux 调度器按负载在 0.8–2.4 GHz 间动态调频
+pi7:
+最高频率：1479000 kHz ≈ 1.479 GHz
+最低频率：102000 kHz ≈ 0.102 GHz（102 MHz）
+调频策略：schedutil，按调度负载在 0.102–1.479 GHz 间动态调频

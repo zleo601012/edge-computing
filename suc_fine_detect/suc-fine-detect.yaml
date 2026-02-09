@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suc-fine-detect
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: suc-fine-detect
+  template:
+    metadata:
+      labels:
+        app: suc-fine-detect
+    spec:
+      containers:
+      - name: suc-fine-detect
+        image: 192.168.1.169:5000/suc-fine-detect:v1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
