@@ -1,6 +1,6 @@
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, Optional
 
-ThresholdValue = Union[float, Tuple[float, float]]
+ThresholdValue = Union[float, Tuple[float, float], Dict[str, Optional[float]]]
 
 def compute_exceed(values: Dict[str, float], thresholds: Dict[str, ThresholdValue]):
     exceed: Dict[str, bool] = {}
@@ -13,17 +13,37 @@ def compute_exceed(values: Dict[str, float], thresholds: Dict[str, ThresholdValu
             continue
 
         t = thresholds[k]
+        # 支持 {low, high} 结构（来自阈值服务）
+        if isinstance(t, dict):
+            low = t.get("low")
+            high = t.get("high")
+            if low is not None and high is not None:
+                t = (float(low), float(high))
+            elif low is not None:
+                t = ("__lower__", float(low))
+            elif high is not None:
+                t = float(high)
+            else:
+                exceed[k] = False
+                ratio[k] = 0.0
+                continue
         # 双边阈值（例如 pH）
         if isinstance(t, (list, tuple)) and len(t) == 2:
-            lo, hi = float(t[0]), float(t[1])
-            bad = (v < lo) or (v > hi)
-            exceed[k] = bad
-            if v < lo:
-                ratio[k] = (lo - v) / max(abs(lo), 1e-9)
-            elif v > hi:
-                ratio[k] = (v - hi) / max(abs(hi), 1e-9)
+            if t[0] == "__lower__":
+                lo = float(t[1])
+                bad = v < lo
+                exceed[k] = bad
+                ratio[k] = (lo - v) / max(abs(lo), 1e-9) if bad else 0.0
             else:
-                ratio[k] = 0.0
+                lo, hi = float(t[0]), float(t[1])
+                bad = (v < lo) or (v > hi)
+                exceed[k] = bad
+                if v < lo:
+                    ratio[k] = (lo - v) / max(abs(lo), 1e-9)
+                elif v > hi:
+                    ratio[k] = (v - hi) / max(abs(hi), 1e-9)
+                else:
+                    ratio[k] = 0.0
         # 单边上限阈值（COD/BOD/TN/NH3N 等）
         else:
             up = float(t)
