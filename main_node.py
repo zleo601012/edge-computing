@@ -18,11 +18,116 @@ from __future__ import annotations
 
 import argparse
 import csv
+import random
 import time
 import sys
+from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime
+from statistics import mean
+from typing import Any, Deque
 
-from service.water_detector import DetectionContext, compute_overlimit_task
+
+@dataclass
+class DetectionContext:
+    """Sliding-window context for per-node detection."""
+
+    window_size: int = 120
+    history: Deque[dict[str, float]] = field(default_factory=deque)
+
+    def append(self, values: dict[str, float]) -> None:
+        self.history.append(values)
+        while len(self.history) > self.window_size:
+            self.history.popleft()
+
+    def baseline(self, key: str, default: float) -> float:
+        vals = [x[key] for x in self.history if key in x]
+        return mean(vals) if vals else default
+
+
+def _to_float(row: dict[str, Any], candidates: list[str]) -> float | None:
+    for key in candidates:
+        val = row.get(key)
+        if val in (None, ""):
+            continue
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def compute_overlimit_task(
+    *,
+    row: dict[str, Any],
+    ctx: DetectionContext,
+    limits: dict[str, float],
+    target_sec: float = 2.0,
+    min_sec: float = 1.0,
+    max_sec: float = 3.0,
+    noise_sigma_rel: float = 0.03,
+    alarm_prob_mean: float = 0.90,
+    alarm_prob_p05: float = 0.60,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Compute over-limit probability with noisy Monte-Carlo simulation."""
+
+    rng = random.Random(seed) if seed is not None else random.Random()
+    values = {
+        "Am": _to_float(row, ["Am", "NH3N_mgL", "am", "nh3n"]),
+        "BOD": _to_float(row, ["BOD", "BOD_mgL", "bod"]),
+        "COD": _to_float(row, ["COD", "COD_mgL", "cod"]),
+        "TN": _to_float(row, ["TN", "TN_mgL", "tn"]),
+    }
+
+    if values["BOD"] is None and values["COD"] is not None:
+        values["BOD"] = values["COD"] * 0.4
+
+    normalized: dict[str, float] = {}
+    for key, limit in limits.items():
+        val = values.get(key)
+        if val is None:
+            val = ctx.baseline(key, limit * 0.5)
+        normalized[key] = float(val)
+
+    start = time.monotonic()
+    calc_sec = max(min_sec, min(max_sec, rng.gauss(target_sec, 0.15)))
+
+    n = 200
+    exceed_rates = []
+    for _ in range(n):
+        count = 0
+        for key, val in normalized.items():
+            noisy = max(0.0, rng.gauss(val, abs(val) * noise_sigma_rel))
+            if noisy > limits[key]:
+                count += 1
+        exceed_rates.append(count / max(1, len(normalized)))
+
+    exceed_rates.sort()
+    prob_mean = mean(exceed_rates)
+    p05 = exceed_rates[int(0.05 * (n - 1))]
+    p95 = exceed_rates[int(0.95 * (n - 1))]
+
+    elapsed = time.monotonic() - start
+    if elapsed < calc_sec:
+        time.sleep(calc_sec - elapsed)
+    elapsed = time.monotonic() - start
+
+    reasons = [key for key, val in normalized.items() if val > limits[key]]
+    alarm = (prob_mean >= alarm_prob_mean) or (p05 >= alarm_prob_p05)
+
+    ctx.append(normalized)
+
+    return {
+        "alarm": alarm,
+        "prob_mean": float(prob_mean),
+        "prob_p05": float(p05),
+        "prob_p95": float(p95),
+        "elapsed_sec": float(elapsed),
+        "used_samples": n,
+        "reasons": reasons,
+        "values": normalized,
+    }
 
 
 SLOT_SECONDS = 5.0  # 5s一个时隙
