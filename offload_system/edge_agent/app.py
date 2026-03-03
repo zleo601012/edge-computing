@@ -172,16 +172,17 @@ async def _worker_loop() -> None:
 
 async def _process_ingest_item(item: Dict[str, Any]) -> None:
     slot = int(item["slot"])
+    event_time = float(item["event_time"])
     trace_id = str(item["trace_id"])
     payload = dict(item["payload"])
 
     # special flush event: only advance slot and close previous ones
     if payload.get("__flush__") is True:
-        await _maybe_advance_slot_and_close(slot)
+        await _maybe_advance_slot(slot)
         return
 
-    # slot transition: close previous slots by running estimate
-    await _maybe_advance_slot_and_close(slot)
+    # slot transition: move active slot forward; estimate happens inside each slot.
+    await _maybe_advance_slot(slot)
 
     # cache one payload for this slot (last one wins)
     async with STATE.lock:
@@ -196,11 +197,18 @@ async def _process_ingest_item(item: Dict[str, Any]) -> None:
     if first:
         await _run_detect_and_maybe_fine(slot=slot, trace_id=trace_id, payload=payload)
 
+    # at the 4th second of each slot, estimate threshold for next slot
+    slot_offset = event_time - float(slot * cfg.slot_seconds)
+    if slot_offset >= 4.0:
+        await _maybe_run_next_slot_estimate(slot=slot, payload=payload)
 
-async def _maybe_advance_slot_and_close(new_slot: int) -> None:
+
+async def _maybe_advance_slot(new_slot: int) -> None:
     """
-    If new_slot > active_slot, close all intermediate slots by running estimate on cached payloads.
-    This makes baseline(t) available before detect(t+1).
+    Advance active slot and trim stale memory.
+
+    Baseline estimation is triggered near the end of each slot (offset >= 4s)
+    so detect at the beginning of next slot can directly read baseline(slot).
     """
     async with STATE.lock:
         active = STATE.active_slot
@@ -210,15 +218,6 @@ async def _maybe_advance_slot_and_close(new_slot: int) -> None:
         return
     if new_slot <= active:
         return
-
-    # close active .. new_slot-1
-    for s in range(active, new_slot):
-        async with STATE.lock:
-            cached = STATE.slot_payload_cache.get(s)
-        if cached is not None:
-            await _run_estimate(slot=s, payload=cached)
-            # trigger uploader check
-            STATE.upload_event.set()
 
     async with STATE.lock:
         STATE.active_slot = new_slot
@@ -231,6 +230,24 @@ async def _maybe_advance_slot_and_close(new_slot: int) -> None:
         for old in list(STATE.detect_done_for_slot.keys()):
             if old < new_slot - 50:
                 STATE.detect_done_for_slot.pop(old, None)
+        for old in list(STATE.estimate_done_for_slot.keys()):
+            if old < new_slot - 50:
+                STATE.estimate_done_for_slot.pop(old, None)
+
+
+async def _maybe_run_next_slot_estimate(slot: int, payload: Dict[str, Any]) -> None:
+    next_slot = slot + 1
+    should_run = False
+    async with STATE.lock:
+        if not STATE.estimate_done_for_slot.get(next_slot, False):
+            STATE.estimate_done_for_slot[next_slot] = True
+            should_run = True
+
+    if not should_run:
+        return
+
+    await _run_estimate(slot=next_slot, payload=payload)
+    STATE.upload_event.set()
 
 
 async def _run_estimate(slot: int, payload: Dict[str, Any]) -> None:
@@ -248,7 +265,7 @@ async def _run_estimate(slot: int, payload: Dict[str, Any]) -> None:
 
 
 async def _run_detect_and_maybe_fine(slot: int, trace_id: str, payload: Dict[str, Any]) -> None:
-    baseline = await storage.get_baseline(slot - 1)
+    baseline = await storage.get_baseline(slot)
     async with STATE.lock:
         STATE.in_flight += 1
     t0 = time.perf_counter()
