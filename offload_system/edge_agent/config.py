@@ -83,10 +83,10 @@ def load_config() -> Config:
         peers=_env_list("PEERS", ""),
         collector_url=_env_str("COLLECTOR_URL", "http://127.0.0.1:9000"),
         db_path=_env_str("DB_PATH", "./edge_agent.db"),
-        slot_seconds=_env_int("SLOT_SECONDS", 300),
+        slot_seconds=_env_int("SLOT_SECONDS", 5),
         upload_every=_env_int("UPLOAD_EVERY", 10),
-        http_timeout_s=_env_float("HTTP_TIMEOUT", 10.0),
-        execute_timeout_s=_env_float("EXECUTE_TIMEOUT", 15.0),
+        http_timeout_s=_env_float("HTTP_TIMEOUT", 1.0),
+        execute_timeout_s=_env_float("EXECUTE_TIMEOUT", 1.0),
         peer_refresh_seconds=_env_float("PEER_REFRESH_SECONDS", 2.0),
         uploader_check_seconds=_env_float("UPLOADER_CHECK_SECONDS", 2.0),
     )
