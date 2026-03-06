@@ -9,6 +9,13 @@ cd "$ROOT_DIR"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 HOST="${HOST:-0.0.0.0}"
+
+# IMPORTANT: require explicit edge port in real deployment.
+PORT="${PORT:-}"
+if [[ -z "$PORT" ]]; then
+  echo "ERROR: PORT is required (do not assume 29101). Example: PORT=9100 scripts/start_edge_node.sh" >&2
+  exit 1
+fi
 PORT="${PORT:-29101}"
 
 NODE_ID="${NODE_ID:-node-1}"
