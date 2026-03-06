@@ -16,6 +16,7 @@ if [[ -z "$PORT" ]]; then
   echo "ERROR: PORT is required (do not assume 29101). Example: PORT=9100 scripts/start_edge_node.sh" >&2
   exit 1
 fi
+PORT="${PORT:-29101}"
 
 NODE_ID="${NODE_ID:-node-1}"
 NODE_TYPE="${NODE_TYPE:-pi}"
