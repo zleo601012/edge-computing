@@ -12,6 +12,17 @@ This guide is for your **real target setup**: 4 edge devices running together an
 - Four edge devices run one `edge_agent` each.
 - Each edge node has its own `NODE_ID` and `PEERS` set to other node addresses.
 
+## 1.1 Decentralized mode (your current setup)
+
+If your cluster already runs the three microservices on each node locally (`8000/8001/8002`),
+you should run edge-agent in `SERVICE_MODE=local` so it calls local services directly:
+
+- estimate: `http://127.0.0.1:8000/estimate`
+- detect: `http://127.0.0.1:8001/detect/eval`
+- fine: `http://127.0.0.1:8002/fine/eval`
+
+In this mode, `CORE_HOST` is not used for compute APIs.
+
 ## 2) Start shared services (desktop/server)
 
 From repo root:
@@ -45,6 +56,7 @@ Let the discovered edge port be `EDGE_PORT`. Use the same value in startup and `
 ### pi1 (192.168.1.167)
 
 ```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi1 NODE_TYPE=pi \
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi1 NODE_TYPE=pi \
 PEERS="http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi1.db scripts/start_edge_node.sh
@@ -53,6 +65,7 @@ DB_PATH=./edge_pi1.db scripts/start_edge_node.sh
 ### pi2 (192.168.1.174)
 
 ```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
@@ -61,6 +74,7 @@ DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
 ### pi3 (192.168.1.175)
 
 ```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
@@ -69,6 +83,9 @@ DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
 ### pi6 (192.168.1.176)
 
 ```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi6 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
+DB_PATH=./edge_pi6.db scripts/start_edge_node.sh
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi6 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
 DB_PATH=./edge_pi6.db scripts/start_edge_node.sh
