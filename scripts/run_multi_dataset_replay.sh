@@ -52,6 +52,23 @@ for f in "$PI7_DATASET" "$PI2_DATASET" "$PI3_DATASET" "$PI4_DATASET"; do
   fi
 done
 
+check_health() {
+  local name="$1"
+  local url="$2"
+  local health="${url%/}/health"
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -fsS --max-time 3 "$health" >/dev/null; then
+      echo "ERROR: $name not ready: $health" >&2
+      exit 1
+    fi
+  fi
+}
+
+check_health pi7 "$PI7_URL"
+check_health pi2 "$PI2_URL"
+check_health pi3 "$PI3_URL"
+check_health pi4 "$PI4_URL"
+
 echo "[start] parallel replay jobs"
 run_one pi7 "$PI7_DATASET" "$PI7_URL" & P1=$!
 run_one pi2 "$PI2_DATASET" "$PI2_URL" & P2=$!
