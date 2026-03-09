@@ -35,6 +35,7 @@ COLLECTOR_PORT="${COLLECTOR_PORT:-29000}"
 SERVICE_MODE="${SERVICE_MODE:-local}"
 
 DB_PATH="${DB_PATH:-./edge_agent_${NODE_ID}.db}"
+CSV_DIR="${CSV_DIR:-}"
 UPLOAD_EVERY="${UPLOAD_EVERY:-2}"
 
 echo "[start] edge node: $NODE_ID ($NODE_TYPE)"
@@ -54,6 +55,7 @@ else
 fi
 
 echo "[mode] SERVICE_MODE=$SERVICE_MODE"
+echo "[paths] DB_PATH=$DB_PATH CSV_DIR=${CSV_DIR:-<auto>}"
 echo "[urls] EST_URL=$EST_URL DET_URL=$DET_URL FINE_URL=$FINE_URL COLLECTOR_URL=$COLLECTOR_URL"
 
 env \
@@ -64,6 +66,8 @@ env \
   EST_URL="$EST_URL" \
   FINE_URL="$FINE_URL" \
   COLLECTOR_URL="$COLLECTOR_URL" \
+  DB_PATH="$DB_PATH" \
+  CSV_DIR="$CSV_DIR" \
   DET_URL="http://$CORE_HOST:$DETECT_PORT/detect/eval" \
   EST_URL="http://$CORE_HOST:$THRESHOLD_PORT/ingest" \
   FINE_URL="http://$CORE_HOST:$FINE_PORT/fine/eval" \

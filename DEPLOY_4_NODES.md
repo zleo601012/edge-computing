@@ -90,6 +90,7 @@ If you run replay before nodes are started, there will be no compute results.
 ```bash
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi7 NODE_TYPE=pi \
 PEERS="http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi7.db CSV_DIR=./csv_pi7_live scripts/start_edge_node.sh
 DB_PATH=./edge_pi7.db scripts/start_edge_node.sh
 ### pi1 (192.168.1.167)
 
@@ -105,6 +106,7 @@ DB_PATH=./edge_pi1.db scripts/start_edge_node.sh
 ```bash
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
 PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi2.db CSV_DIR=./csv_pi2_live scripts/start_edge_node.sh
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
@@ -115,6 +117,7 @@ DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
 ```bash
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi3.db CSV_DIR=./csv_pi3_live scripts/start_edge_node.sh
 DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
 ```
 
@@ -123,6 +126,10 @@ DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
 ```bash
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi4 NODE_TYPE=pi \
 PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
+DB_PATH=./edge_pi4.db CSV_DIR=./csv_pi4_live scripts/start_edge_node.sh
+```
+
+## 3) Replay dataset to all 4 nodes (from your control machine, after all 4 nodes are up)
 DB_PATH=./edge_pi4.db scripts/start_edge_node.sh
 ```
 
@@ -258,6 +265,10 @@ PY
 
 If both are >0 across nodes, cross-node offloading is working.
 
+Note: edge-agent now writes CSV continuously during runtime.
+- Default CSV dir: `${DB_PATH without .db}_csv`
+- Files: `baseline.csv`, `detect_result.csv`, `fine_result.csv`
+- You can override with `CSV_DIR=...` in `scripts/start_edge_node.sh` startup env.
 
 ### Export results to CSV (easier than opening DB directly)
 

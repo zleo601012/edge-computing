@@ -46,7 +46,7 @@ class ExecuteResp(BaseModel):
 
 
 # runtime singletons
-storage = Storage(cfg.db_path)
+storage = Storage(cfg.db_path, csv_dir=cfg.csv_dir)
 caller = LocalCaller(cfg)
 
 
