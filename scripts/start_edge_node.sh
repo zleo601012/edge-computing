@@ -16,6 +16,7 @@ if [[ -z "$PORT" ]]; then
   echo "ERROR: PORT is required (do not assume 29101). Example: PORT=9100 scripts/start_edge_node.sh" >&2
   exit 1
 fi
+PORT="${PORT:-29101}"
 
 NODE_ID="${NODE_ID:-node-1}"
 NODE_TYPE="${NODE_TYPE:-pi}"
@@ -67,5 +68,10 @@ env \
   COLLECTOR_URL="$COLLECTOR_URL" \
   DB_PATH="$DB_PATH" \
   CSV_DIR="$CSV_DIR" \
+  DET_URL="http://$CORE_HOST:$DETECT_PORT/detect/eval" \
+  EST_URL="http://$CORE_HOST:$THRESHOLD_PORT/ingest" \
+  FINE_URL="http://$CORE_HOST:$FINE_PORT/fine/eval" \
+  COLLECTOR_URL="http://$CORE_HOST:$COLLECTOR_PORT" \
+  DB_PATH="$DB_PATH" \
   UPLOAD_EVERY="$UPLOAD_EVERY" \
   "$PYTHON_BIN" -m uvicorn offload_system.edge_agent.app:app --host "$HOST" --port "$PORT"
