@@ -42,6 +42,10 @@ Assume (your real environment):
   - pi2: `192.168.1.174`
   - pi3: `192.168.1.175`
   - pi4: `192.168.1.176`
+  - pi1: `192.168.1.167`
+  - pi2: `192.168.1.174`
+  - pi3: `192.168.1.175`
+  - pi6: `192.168.1.176`
 
 > Important: do **not** assume edge port is `29101`.
 > First find each node's actual edge port (if already running):
@@ -59,6 +63,13 @@ Let the discovered edge port be `EDGE_PORT`. Use the same value in startup and `
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi7 NODE_TYPE=pi \
 PEERS="http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi7.db scripts/start_edge_node.sh
+### pi1 (192.168.1.167)
+
+```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi1 NODE_TYPE=pi \
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi1 NODE_TYPE=pi \
+PEERS="http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi1.db scripts/start_edge_node.sh
 ```
 
 ### pi2 (192.168.1.174)
@@ -66,6 +77,8 @@ DB_PATH=./edge_pi7.db scripts/start_edge_node.sh
 ```bash
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
 PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
 ```
 
@@ -120,6 +133,76 @@ You can override via env vars, for example:
 
 ```bash
 SPEED=20 SLOT_SECONDS=5 PI7_URL=http://192.168.1.177:9100 PI7_DATASET=dataset/node_1.csv PI2_URL=http://192.168.1.174:9100 PI2_DATASET=dataset/node_2.csv PI3_URL=http://192.168.1.175:9100 PI3_DATASET=dataset/node_3.csv PI4_URL=http://192.168.1.176:9100 PI4_DATASET=dataset/node_4.csv scripts/run_multi_dataset_replay.sh
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
+```
+
+### pi6 (192.168.1.176)
+
+```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi6 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
+DB_PATH=./edge_pi6.db scripts/start_edge_node.sh
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi6 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
+DB_PATH=./edge_pi6.db scripts/start_edge_node.sh
+Assume:
+- core host IP: `192.168.1.10`
+- node IPs:
+  - node-1: `192.168.1.21:29101`
+  - node-2: `192.168.1.22:29101`
+  - node-3: `192.168.1.23:29101`
+  - node-4: `192.168.1.24:29101`
+
+### node-1
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-1 NODE_TYPE=pi \
+PEERS="http://192.168.1.22:29101,http://192.168.1.23:29101,http://192.168.1.24:29101" \
+DB_PATH=./edge_node1.db scripts/start_edge_node.sh
+```
+
+### node-2
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-2 NODE_TYPE=pi \
+PEERS="http://192.168.1.21:29101,http://192.168.1.23:29101,http://192.168.1.24:29101" \
+DB_PATH=./edge_node2.db scripts/start_edge_node.sh
+```
+
+### node-3
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-3 NODE_TYPE=pi \
+PEERS="http://192.168.1.21:29101,http://192.168.1.22:29101,http://192.168.1.24:29101" \
+DB_PATH=./edge_node3.db scripts/start_edge_node.sh
+```
+
+### node-4
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-4 NODE_TYPE=pi \
+PEERS="http://192.168.1.21:29101,http://192.168.1.22:29101,http://192.168.1.23:29101" \
+DB_PATH=./edge_node4.db scripts/start_edge_node.sh
+```
+
+## 4) Replay dataset to all 4 nodes (from desktop/server)
+
+Use existing replayer script and explicit node->agent mapping:
+
+```bash
+python3 -m offload_system.replayer.replay \
+  --dataset dataset/node_1.csv \
+  --agent-map-json '{"ENT_1":"http://192.168.1.167:${EDGE_PORT}","ENT_2":"http://192.168.1.174:${EDGE_PORT}","ENT_3":"http://192.168.1.175:${EDGE_PORT}","ENT_4":"http://192.168.1.176:${EDGE_PORT}"}' \
+  --default-agent http://192.168.1.167:${EDGE_PORT} \
+  --agent-map-json '{"ENT_1":"http://192.168.1.21:29101","ENT_2":"http://192.168.1.22:29101","ENT_3":"http://192.168.1.23:29101","ENT_4":"http://192.168.1.24:29101"}' \
+  --default-agent http://192.168.1.21:29101 \
+  --time-col ts \
+  --node-col node_id \
+  --relative-time \
+  --slot-seconds 5 \
+  --speed 10
 ```
 
 ## 5) Verify offloading happened
@@ -130,6 +213,8 @@ On each node check local DB has offload rows:
 python3 - <<'PY'
 import sqlite3
 conn = sqlite3.connect('edge_pi7.db')
+conn = sqlite3.connect('edge_pi1.db')
+conn = sqlite3.connect('edge_node1.db')
 cur = conn.cursor()
 cur.execute('select count(*) from fine_result where offloaded=1')
 print('offloaded rows:', cur.fetchone()[0])
