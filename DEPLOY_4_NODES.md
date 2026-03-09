@@ -38,6 +38,10 @@ Keep this terminal running.
 Assume (your real environment):
 - core host IP: `192.168.1.169`
 - node IPs:
+  - pi7: `192.168.1.177`
+  - pi2: `192.168.1.174`
+  - pi3: `192.168.1.175`
+  - pi4: `192.168.1.176`
   - pi1: `192.168.1.167`
   - pi2: `192.168.1.174`
   - pi3: `192.168.1.175`
@@ -53,6 +57,12 @@ ss -lntp | grep -E 'LISTEN|python|uvicorn'
 
 Let the discovered edge port be `EDGE_PORT`. Use the same value in startup and `PEERS`.
 
+### pi7 (192.168.1.177)
+
+```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi7 NODE_TYPE=pi \
+PEERS="http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi7.db scripts/start_edge_node.sh
 ### pi1 (192.168.1.167)
 
 ```bash
@@ -66,6 +76,7 @@ DB_PATH=./edge_pi1.db scripts/start_edge_node.sh
 
 ```bash
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
+PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
@@ -75,6 +86,53 @@ DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
 
 ```bash
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
+PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
+```
+
+### pi4 (192.168.1.176)
+
+```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi4 NODE_TYPE=pi \
+PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
+DB_PATH=./edge_pi4.db scripts/start_edge_node.sh
+```
+
+## 4) Replay dataset to all 4 nodes (from desktop/server)
+
+Use existing replayer script and explicit node->agent mapping:
+
+```bash
+python3 -m offload_system.replayer.replay \
+  --dataset dataset/node_1.csv \
+  --agent-map-json '{"ENT_1":"http://192.168.1.177:${EDGE_PORT}","ENT_2":"http://192.168.1.174:${EDGE_PORT}","ENT_3":"http://192.168.1.175:${EDGE_PORT}","ENT_4":"http://192.168.1.176:${EDGE_PORT}"}' \
+  --default-agent http://192.168.1.177:${EDGE_PORT} \
+  --time-col ts \
+  --node-col node_id \
+  --relative-time \
+  --slot-seconds 5 \
+  --speed 10
+```
+
+
+## 4.1 Auto replay with per-node datasets (recommended)
+
+If you need each node to consume its own health dataset automatically (no manual row-by-row feeding), use:
+
+```bash
+scripts/run_multi_dataset_replay.sh
+```
+
+Default mapping in this script:
+- `pi7` <- `dataset/node_1.csv`
+- `pi2` <- `dataset/node_2.csv`
+- `pi3` <- `dataset/node_3.csv`
+- `pi4` <- `dataset/node_4.csv`
+
+You can override via env vars, for example:
+
+```bash
+SPEED=20 SLOT_SECONDS=5 PI7_URL=http://192.168.1.177:9100 PI7_DATASET=dataset/node_1.csv PI2_URL=http://192.168.1.174:9100 PI2_DATASET=dataset/node_2.csv PI3_URL=http://192.168.1.175:9100 PI3_DATASET=dataset/node_3.csv PI4_URL=http://192.168.1.176:9100 PI4_DATASET=dataset/node_4.csv scripts/run_multi_dataset_replay.sh
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
@@ -154,6 +212,7 @@ On each node check local DB has offload rows:
 ```bash
 python3 - <<'PY'
 import sqlite3
+conn = sqlite3.connect('edge_pi7.db')
 conn = sqlite3.connect('edge_pi1.db')
 conn = sqlite3.connect('edge_node1.db')
 cur = conn.cursor()
