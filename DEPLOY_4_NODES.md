@@ -241,6 +241,22 @@ bash scripts/start_edge_node.sh
 `start_edge_node.sh` now performs fail-fast URL checks before launching uvicorn, so misconfigured URLs are reported immediately.
 
 
+
+### 5.1 Quick connectivity test (new, exact commands)
+
+After you start one edge node, immediately verify the *actual endpoints it uses* from the startup log line `[urls] ...`.
+
+For your current k3s service IPs (as you provided), run on that same machine:
+
+```bash
+curl -sS -X POST http://10.43.197.158:8000/ingest -H 'content-type: application/json' -d '{}' | head
+curl -sS -X POST http://10.43.3.242:8001/detect/eval -H 'content-type: application/json' -d '{}' | head
+curl -sS -X POST http://10.43.196.176:8002/fine/eval -H 'content-type: application/json' -d '{}' | head
+```
+
+Expected: usually `422`/validation error JSON (this means service is reachable and route is correct).
+If you get timeout/refused, host cannot reach ClusterIP directly; use NodePort URLs instead.
+
 ## 6) k3s deployment note (you said you use k3s)
 
 When running edge-agent on host OS and microservices in k3s, `127.0.0.1:8000/8001/8002` usually does not work.
@@ -325,6 +341,7 @@ Use a **single-line** command (avoid copy/paste line-break artifacts), for examp
 SERVICE_MODE=local AUTO_K3S_URLS=0 AUTO_PEERS=1 CLUSTER_NODE_IPS="192.168.1.177,192.168.1.174,192.168.1.175,192.168.1.176" NODE_IP=192.168.1.177 PORT=9100 NODE_ID=pi7 NODE_TYPE=pi DB_PATH=./edge_pi7.db CSV_DIR=./csv_pi7_live LOCAL_EST_URL=http://127.0.0.1:18000/ingest LOCAL_DET_URL=http://127.0.0.1:18001/detect/eval LOCAL_FINE_URL=http://127.0.0.1:18002/fine/eval LOCAL_COLLECTOR_URL=http://127.0.0.1:19000 bash scripts/start_edge_node.sh
 ```
 
+`start_edge_node.sh` accepts `EST_URL/DET_URL/FINE_URL/COLLECTOR_URL` and these explicitly override `LOCAL_*` values.
 `start_edge_node.sh` also accepts `EST_URL/DET_URL/FINE_URL/COLLECTOR_URL` as compatibility aliases.
 
 

@@ -35,6 +35,8 @@ FINE_PORT="${FINE_PORT:-28002}"
 COLLECTOR_PORT="${COLLECTOR_PORT:-29000}"
 
 # Optional per-node local microservice URLs (used when SERVICE_MODE=local).
+# Compatibility: EST_URL/DET_URL/FINE_URL/COLLECTOR_URL should always win over LOCAL_*.
+# This avoids stale exported LOCAL_* values silently overriding the command-line EST_URL.
 # Compatibility: if EST_URL/DET_URL/FINE_URL/COLLECTOR_URL are already set by user,
 # use them as LOCAL_* defaults to avoid accidental fallback to 8000/8001/8002.
 # Shortcut profile: LOCAL_PROFILE=18000 -> 18000/18001/18002 (+ collector 19000).
@@ -45,11 +47,23 @@ if [[ "$LOCAL_PROFILE" == "18000" ]]; then
   _DEFAULT_FINE_URL="http://127.0.0.1:18002/fine/eval"
   _DEFAULT_COLLECTOR_URL="http://127.0.0.1:19000"
 else
+  _DEFAULT_EST_URL="http://127.0.0.1:8000/ingest"
   _DEFAULT_EST_URL="http://127.0.0.1:8000/estimate"
   _DEFAULT_DET_URL="http://127.0.0.1:8001/detect/eval"
   _DEFAULT_FINE_URL="http://127.0.0.1:8002/fine/eval"
   _DEFAULT_COLLECTOR_URL="http://127.0.0.1:9000"
 fi
+LOCAL_EST_URL="${LOCAL_EST_URL:-${_DEFAULT_EST_URL}}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-${_DEFAULT_DET_URL}}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-${_DEFAULT_FINE_URL}}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-${_DEFAULT_COLLECTOR_URL}}"
+
+# Explicit EST_URL/DET_URL/FINE_URL/COLLECTOR_URL (often passed inline before bash)
+# must override LOCAL_* to match user expectation.
+if [[ -n "${EST_URL:-}" ]]; then LOCAL_EST_URL="$EST_URL"; fi
+if [[ -n "${DET_URL:-}" ]]; then LOCAL_DET_URL="$DET_URL"; fi
+if [[ -n "${FINE_URL:-}" ]]; then LOCAL_FINE_URL="$FINE_URL"; fi
+if [[ -n "${COLLECTOR_URL:-}" ]]; then LOCAL_COLLECTOR_URL="$COLLECTOR_URL"; fi
 LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-${_DEFAULT_EST_URL}}}"
 LOCAL_DET_URL="${LOCAL_DET_URL:-${DET_URL:-${_DEFAULT_DET_URL}}}"
 LOCAL_FINE_URL="${LOCAL_FINE_URL:-${FINE_URL:-${_DEFAULT_FINE_URL}}}"
