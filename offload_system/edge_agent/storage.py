@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import csv
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import aiosqlite
 
@@ -39,15 +41,22 @@ class FineRow:
 
 
 class Storage:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, csv_dir: str = ""):
         self.db_path = db_path
         self.db: Optional[aiosqlite.Connection] = None
+        # If csv_dir is empty, persist CSV next to db by default.
+        default_dir = str(Path(db_path).with_suffix("")) + "_csv"
+        self.csv_dir = Path(csv_dir) if csv_dir else Path(default_dir)
+        self._baseline_csv = self.csv_dir / "baseline.csv"
+        self._detect_csv = self.csv_dir / "detect_result.csv"
+        self._fine_csv = self.csv_dir / "fine_result.csv"
 
     async def open(self) -> None:
         self.db = await aiosqlite.connect(self.db_path)
         await self.db.execute("PRAGMA journal_mode=WAL;")
         await self.db.execute("PRAGMA synchronous=NORMAL;")
         await self._init_schema()
+        self._init_csv_files()
 
     async def close(self) -> None:
         if self.db:
@@ -96,15 +105,58 @@ class Storage:
         )
         await self.db.commit()
 
+    def _init_csv_files(self) -> None:
+        self.csv_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_csv_header(
+            self._baseline_csv,
+            ["op_ts", "slot", "trace_id", "created_ts", "payload_json"],
+        )
+        self._ensure_csv_header(
+            self._detect_csv,
+            ["op_ts", "slot", "trace_id", "created_ts", "abnormal", "payload_json"],
+        )
+        self._ensure_csv_header(
+            self._fine_csv,
+            [
+                "op_ts",
+                "slot",
+                "trace_id",
+                "created_ts",
+                "offloaded",
+                "executed_on",
+                "origin",
+                "ok",
+                "duration_ms",
+                "payload_json",
+            ],
+        )
+
+    @staticmethod
+    def _ensure_csv_header(path: Path, header: List[str]) -> None:
+        if path.exists() and path.stat().st_size > 0:
+            return
+        with path.open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(header)
+
+    @staticmethod
+    def _append_csv_row(path: Path, row: List[Any]) -> None:
+        with path.open("a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(row)
+
     # ---------- baseline ----------
     async def upsert_baseline(self, slot: int, trace_id: str, payload: Dict[str, Any]) -> None:
         assert self.db is not None
+        created_ts = time.time()
+        payload_json = json.dumps(payload, ensure_ascii=False)
         await self.db.execute(
             "INSERT INTO baseline(slot, trace_id, created_ts, payload_json) VALUES(?,?,?,?) "
             "ON CONFLICT(slot) DO UPDATE SET trace_id=excluded.trace_id, created_ts=excluded.created_ts, payload_json=excluded.payload_json",
-            (slot, trace_id, time.time(), json.dumps(payload, ensure_ascii=False)),
+            (slot, trace_id, created_ts, payload_json),
         )
         await self.db.commit()
+        self._append_csv_row(self._baseline_csv, [time.time(), slot, trace_id, created_ts, payload_json])
 
     async def get_baseline(self, slot: int) -> Optional[Dict[str, Any]]:
         assert self.db is not None
@@ -139,12 +191,16 @@ class Storage:
     # ---------- detect ----------
     async def upsert_detect(self, slot: int, trace_id: str, abnormal: bool, payload: Dict[str, Any]) -> None:
         assert self.db is not None
+        created_ts = time.time()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        abnormal_i = 1 if abnormal else 0
         await self.db.execute(
             "INSERT INTO detect_result(slot, trace_id, created_ts, abnormal, payload_json) VALUES(?,?,?,?,?) "
             "ON CONFLICT(slot) DO UPDATE SET trace_id=excluded.trace_id, created_ts=excluded.created_ts, abnormal=excluded.abnormal, payload_json=excluded.payload_json",
-            (slot, trace_id, time.time(), 1 if abnormal else 0, json.dumps(payload, ensure_ascii=False)),
+            (slot, trace_id, created_ts, abnormal_i, payload_json),
         )
         await self.db.commit()
+        self._append_csv_row(self._detect_csv, [time.time(), slot, trace_id, created_ts, abnormal_i, payload_json])
 
     async def fetch_detect_for_slots(self, slots: List[int]) -> List[DetectRow]:
         if not slots:
@@ -169,22 +225,31 @@ class Storage:
         payload: Dict[str, Any],
     ) -> None:
         assert self.db is not None
+        created_ts = time.time()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        offloaded_i = 1 if offloaded else 0
+        ok_i = 1 if ok else 0
+        duration = float(duration_ms)
         await self.db.execute(
             "INSERT INTO fine_result(slot, trace_id, created_ts, offloaded, executed_on, origin, ok, duration_ms, payload_json) "
             "VALUES(?,?,?,?,?,?,?,?,?)",
             (
                 slot,
                 trace_id,
-                time.time(),
-                1 if offloaded else 0,
+                created_ts,
+                offloaded_i,
                 executed_on,
                 origin,
-                1 if ok else 0,
-                float(duration_ms),
-                json.dumps(payload, ensure_ascii=False),
+                ok_i,
+                duration,
+                payload_json,
             ),
         )
         await self.db.commit()
+        self._append_csv_row(
+            self._fine_csv,
+            [time.time(), slot, trace_id, created_ts, offloaded_i, executed_on, origin, ok_i, duration, payload_json],
+        )
 
     async def fetch_fine_for_slots(self, slots: List[int]) -> List[FineRow]:
         if not slots:
