@@ -12,6 +12,20 @@ This guide is for your **real target setup**: 4 edge devices running together an
 ## 1.1 Service mode
 
 For your setup, use `SERVICE_MODE=local`. In this mode edge-agent calls local services directly:
+## 1) Topology
+
+- One desktop/server runs shared services:
+  - threshold_service
+  - svc_detect
+  - suc_fine_detect
+  - collector_pc
+- Four edge devices run one `edge_agent` each.
+- Each edge node has its own `NODE_ID` and `PEERS` set to other node addresses.
+
+## 1.1 Decentralized mode (your current setup)
+
+If your cluster already runs the three microservices on each node locally (`8000/8001/8002`),
+you should run edge-agent in `SERVICE_MODE=local` so it calls local services directly:
 
 - estimate: `http://127.0.0.1:8000/estimate`
 - detect: `http://127.0.0.1:8001/detect/eval`
@@ -25,6 +39,18 @@ If your local microservices are not on default ports, override startup vars:
 - `LOCAL_FINE_URL` (default `http://127.0.0.1:8002/fine/eval`)
 
 ## 2) Start each edge node (on each device)
+## 2) Start each edge node (on each device)
+## 2) Start shared services (desktop/server)
+
+From repo root:
+
+```bash
+scripts/start_core_services.sh
+```
+
+Keep this terminal running.
+
+## 3) Start each edge node (on each device)
 
 Assume (your real environment):
 - core host IP: `192.168.1.169`
@@ -33,6 +59,10 @@ Assume (your real environment):
   - pi2: `192.168.1.174`
   - pi3: `192.168.1.175`
   - pi4: `192.168.1.176`
+  - pi1: `192.168.1.167`
+  - pi2: `192.168.1.174`
+  - pi3: `192.168.1.175`
+  - pi6: `192.168.1.176`
 
 > Important: do **not** assume edge port is `29101`.
 > First find each node's actual edge port (if already running):
@@ -67,6 +97,14 @@ If you run replay before nodes are started, there will be no compute results.
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi7 NODE_TYPE=pi \
 PEERS="http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi7.db CSV_DIR=./csv_pi7_live scripts/start_edge_node.sh
+DB_PATH=./edge_pi7.db scripts/start_edge_node.sh
+### pi1 (192.168.1.167)
+
+```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi1 NODE_TYPE=pi \
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi1 NODE_TYPE=pi \
+PEERS="http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi1.db scripts/start_edge_node.sh
 ```
 
 ### pi2 (192.168.1.174)
@@ -75,6 +113,9 @@ DB_PATH=./edge_pi7.db CSV_DIR=./csv_pi7_live scripts/start_edge_node.sh
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
 PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi2.db CSV_DIR=./csv_pi2_live scripts/start_edge_node.sh
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi2 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi2.db scripts/start_edge_node.sh
 ```
 
 ### pi3 (192.168.1.175)
@@ -83,6 +124,7 @@ DB_PATH=./edge_pi2.db CSV_DIR=./csv_pi2_live scripts/start_edge_node.sh
 SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.177:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi3.db CSV_DIR=./csv_pi3_live scripts/start_edge_node.sh
+DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
 ```
 
 ### pi4 (192.168.1.176)
@@ -94,6 +136,11 @@ DB_PATH=./edge_pi4.db CSV_DIR=./csv_pi4_live scripts/start_edge_node.sh
 ```
 
 ## 3) Replay dataset to all 4 nodes (from your control machine, after all 4 nodes are up)
+DB_PATH=./edge_pi4.db scripts/start_edge_node.sh
+```
+
+## 3) Replay dataset to all 4 nodes (from your control machine, after all 4 nodes are up)
+## 4) Replay dataset to all 4 nodes (from desktop/server)
 
 Use existing replayer script and explicit node->agent mapping:
 
@@ -111,6 +158,7 @@ python3 -m offload_system.replayer.replay \
 
 
 ## 3.1 Auto replay with per-node datasets (recommended)
+## 4.1 Auto replay with per-node datasets (recommended)
 
 If you need each node to consume its own health dataset automatically (no manual row-by-row feeding), use:
 
@@ -234,4 +282,112 @@ The script prints:
 Run those exports, then start edge-agent as usual.
 
 The helper script will auto-fallback to `k3s kubectl` and auto-use `/etc/rancher/k3s/k3s.yaml` when available.
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
+DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
+```
+
+### pi6 (192.168.1.176)
+
+```bash
+SERVICE_MODE=local PORT=${EDGE_PORT} NODE_ID=pi6 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
+DB_PATH=./edge_pi6.db scripts/start_edge_node.sh
+CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi6 NODE_TYPE=pi \
+PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.175:${EDGE_PORT}" \
+DB_PATH=./edge_pi6.db scripts/start_edge_node.sh
+Assume:
+- core host IP: `192.168.1.10`
+- node IPs:
+  - node-1: `192.168.1.21:29101`
+  - node-2: `192.168.1.22:29101`
+  - node-3: `192.168.1.23:29101`
+  - node-4: `192.168.1.24:29101`
+
+### node-1
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-1 NODE_TYPE=pi \
+PEERS="http://192.168.1.22:29101,http://192.168.1.23:29101,http://192.168.1.24:29101" \
+DB_PATH=./edge_node1.db scripts/start_edge_node.sh
+```
+
+### node-2
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-2 NODE_TYPE=pi \
+PEERS="http://192.168.1.21:29101,http://192.168.1.23:29101,http://192.168.1.24:29101" \
+DB_PATH=./edge_node2.db scripts/start_edge_node.sh
+```
+
+### node-3
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-3 NODE_TYPE=pi \
+PEERS="http://192.168.1.21:29101,http://192.168.1.22:29101,http://192.168.1.24:29101" \
+DB_PATH=./edge_node3.db scripts/start_edge_node.sh
+```
+
+### node-4
+
+```bash
+CORE_HOST=192.168.1.10 PORT=29101 NODE_ID=node-4 NODE_TYPE=pi \
+PEERS="http://192.168.1.21:29101,http://192.168.1.22:29101,http://192.168.1.23:29101" \
+DB_PATH=./edge_node4.db scripts/start_edge_node.sh
+```
+
+## 4) Replay dataset to all 4 nodes (from desktop/server)
+
+Use existing replayer script and explicit node->agent mapping:
+
+```bash
+python3 -m offload_system.replayer.replay \
+  --dataset dataset/node_1.csv \
+  --agent-map-json '{"ENT_1":"http://192.168.1.167:${EDGE_PORT}","ENT_2":"http://192.168.1.174:${EDGE_PORT}","ENT_3":"http://192.168.1.175:${EDGE_PORT}","ENT_4":"http://192.168.1.176:${EDGE_PORT}"}' \
+  --default-agent http://192.168.1.167:${EDGE_PORT} \
+  --agent-map-json '{"ENT_1":"http://192.168.1.21:29101","ENT_2":"http://192.168.1.22:29101","ENT_3":"http://192.168.1.23:29101","ENT_4":"http://192.168.1.24:29101"}' \
+  --default-agent http://192.168.1.21:29101 \
+  --time-col ts \
+  --node-col node_id \
+  --relative-time \
+  --slot-seconds 5 \
+  --speed 10
+```
+
+## 5) Verify offloading happened
+
+On each node check local DB has offload rows:
+
+```bash
+python3 - <<'PY'
+import sqlite3
+conn = sqlite3.connect('edge_pi7.db')
+conn = sqlite3.connect('edge_pi1.db')
+conn = sqlite3.connect('edge_node1.db')
+cur = conn.cursor()
+cur.execute('select count(*) from fine_result where offloaded=1')
+print('offloaded rows:', cur.fetchone()[0])
+cur.execute('select count(*) from fine_result where origin!=executed_on')
+print('remote execution rows:', cur.fetchone()[0])
+PY
+```
+
+If both are >0 across nodes, cross-node offloading is working.
+
+Note: edge-agent now writes CSV continuously during runtime.
+- Default CSV dir: `${DB_PATH without .db}_csv`
+- Files: `baseline.csv`, `detect_result.csv`, `fine_result.csv`
+- You can override with `CSV_DIR=...` in `scripts/start_edge_node.sh` startup env.
+
+### Export results to CSV (easier than opening DB directly)
+
+If DB files are inconvenient to inspect, export per-table CSV files:
+
+```bash
+# example for pi7 db
+scripts/export_edge_db_csv.sh ./edge_pi7.db ./csv_pi7
+# outputs: csv_pi7/baseline.csv csv_pi7/detect_result.csv csv_pi7/fine_result.csv
+```
+
+You can run the same command on each node with its own DB path.
 
