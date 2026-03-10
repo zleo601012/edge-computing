@@ -57,6 +57,7 @@ class Config:
 
     # storage / timing
     db_path: str
+    csv_dir: str
     slot_seconds: int
     upload_every: int
 
@@ -83,6 +84,7 @@ def load_config() -> Config:
         peers=_env_list("PEERS", ""),
         collector_url=_env_str("COLLECTOR_URL", "http://127.0.0.1:9000"),
         db_path=_env_str("DB_PATH", "./edge_agent.db"),
+        csv_dir=_env_str("CSV_DIR", ""),
         slot_seconds=_env_int("SLOT_SECONDS", 5),
         upload_every=_env_int("UPLOAD_EVERY", 10),
         http_timeout_s=_env_float("HTTP_TIMEOUT", 1.0),
