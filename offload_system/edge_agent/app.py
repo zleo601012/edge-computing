@@ -46,7 +46,7 @@ class ExecuteResp(BaseModel):
 
 
 # runtime singletons
-storage = Storage(cfg.db_path)
+storage = Storage(cfg.db_path, csv_dir=cfg.csv_dir)
 caller = LocalCaller(cfg)
 
 
@@ -277,8 +277,10 @@ async def _run_detect_and_maybe_fine(slot: int, trace_id: str, payload: Dict[str
 
     abnormal = False
     if ok:
-        # convention: detect service returns {"abnormal": true/false, ...}
-        abnormal = bool(result.get("abnormal", False))
+        # support both conventions:
+        # - {"abnormal": true/false}
+        # - {"any_exceed": true/false} (svc_detect)
+        abnormal = bool(result.get("abnormal", result.get("any_exceed", False)))
     else:
         # if detect fails, mark abnormal=false but persist error
         result = {"error": err, "result": result}
