@@ -246,6 +246,8 @@ bash scripts/start_edge_node.sh
 When running edge-agent on host OS and microservices in k3s, `127.0.0.1:8000/8001/8002` usually does not work.
 You must point edge-agent to k3s Service endpoints via `LOCAL_*_URL`.
 
+Note: `offload_system/edge_agent/config.py` default URLs now point to k3s service DNS (`threshold-service`, `svc-detect`, `suc-fine-detect`).
+
 ### 6.1 Inspect service exposure
 
 If you see `The connection to the server localhost:8080 was refused`, your kubeconfig is not loaded.

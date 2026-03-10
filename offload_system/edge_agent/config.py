@@ -78,9 +78,10 @@ def load_config() -> Config:
     return Config(
         node_id=_env_str("NODE_ID", "node-unknown"),
         node_type=_env_str("NODE_TYPE", "pi").lower(),
-        est_url=_env_str("EST_URL", "http://127.0.0.1:8000/estimate"),
-        det_url=_env_str("DET_URL", "http://127.0.0.1:8001/detect"),
-        fine_url=_env_str("FINE_URL", "http://127.0.0.1:8002/fine"),
+        # Default to k8s service DNS names (can still override via EST_URL/DET_URL/FINE_URL).
+        est_url=_env_str("EST_URL", "http://threshold-service:8000/ingest"),
+        det_url=_env_str("DET_URL", "http://svc-detect:8001/detect/eval"),
+        fine_url=_env_str("FINE_URL", "http://suc-fine-detect:8002/fine/eval"),
         peers=_env_list("PEERS", ""),
         collector_url=_env_str("COLLECTOR_URL", "http://127.0.0.1:9000"),
         db_path=_env_str("DB_PATH", "./edge_agent.db"),
