@@ -324,6 +324,18 @@ SERVICE_MODE=local AUTO_K3S_URLS=0 AUTO_PEERS=1 CLUSTER_NODE_IPS="192.168.1.177,
 ```
 
 `start_edge_node.sh` also accepts `EST_URL/DET_URL/FINE_URL/COLLECTOR_URL` as compatibility aliases.
+
+
+
+### 7.2 Short command for 18000/18001/18002 local services
+
+If your local microservices run on 18000/18001/18002 (collector 19000), use this shortcut profile:
+
+```bash
+SERVICE_MODE=local LOCAL_PROFILE=18000 AUTO_K3S_URLS=0 AUTO_PEERS=1 CLUSTER_NODE_IPS="192.168.1.177,192.168.1.174,192.168.1.175,192.168.1.176" NODE_IP=192.168.1.177 PORT=9100 NODE_ID=pi7 NODE_TYPE=pi DB_PATH=./edge_pi7.db CSV_DIR=./csv_pi7_live bash scripts/start_edge_node.sh
+```
+
+This avoids typing `LOCAL_EST_URL/LOCAL_DET_URL/LOCAL_FINE_URL/LOCAL_COLLECTOR_URL` every time.
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi3.db scripts/start_edge_node.sh

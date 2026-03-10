@@ -37,6 +37,23 @@ COLLECTOR_PORT="${COLLECTOR_PORT:-29000}"
 # Optional per-node local microservice URLs (used when SERVICE_MODE=local).
 # Compatibility: if EST_URL/DET_URL/FINE_URL/COLLECTOR_URL are already set by user,
 # use them as LOCAL_* defaults to avoid accidental fallback to 8000/8001/8002.
+# Shortcut profile: LOCAL_PROFILE=18000 -> 18000/18001/18002 (+ collector 19000).
+LOCAL_PROFILE="${LOCAL_PROFILE:-default}"
+if [[ "$LOCAL_PROFILE" == "18000" ]]; then
+  _DEFAULT_EST_URL="http://127.0.0.1:18000/ingest"
+  _DEFAULT_DET_URL="http://127.0.0.1:18001/detect/eval"
+  _DEFAULT_FINE_URL="http://127.0.0.1:18002/fine/eval"
+  _DEFAULT_COLLECTOR_URL="http://127.0.0.1:19000"
+else
+  _DEFAULT_EST_URL="http://127.0.0.1:8000/estimate"
+  _DEFAULT_DET_URL="http://127.0.0.1:8001/detect/eval"
+  _DEFAULT_FINE_URL="http://127.0.0.1:8002/fine/eval"
+  _DEFAULT_COLLECTOR_URL="http://127.0.0.1:9000"
+fi
+LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-${_DEFAULT_EST_URL}}}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-${DET_URL:-${_DEFAULT_DET_URL}}}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-${FINE_URL:-${_DEFAULT_FINE_URL}}}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-${COLLECTOR_URL:-${_DEFAULT_COLLECTOR_URL}}}"
 LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-http://127.0.0.1:8000/estimate}}"
 LOCAL_DET_URL="${LOCAL_DET_URL:-${DET_URL:-http://127.0.0.1:8001/detect/eval}}"
 LOCAL_FINE_URL="${LOCAL_FINE_URL:-${FINE_URL:-http://127.0.0.1:8002/fine/eval}}"
@@ -143,6 +160,7 @@ fi
 echo "[mode] SERVICE_MODE=$SERVICE_MODE"
 echo "[paths] DB_PATH=$DB_PATH CSV_DIR=${CSV_DIR:-<auto>}"
 echo "[urls] EST_URL=$EST_URL DET_URL=$DET_URL FINE_URL=$FINE_URL COLLECTOR_URL=$COLLECTOR_URL"
+echo "[profile] LOCAL_PROFILE=$LOCAL_PROFILE"
 echo "[precheck] PRECHECK_URLS=$PRECHECK_URLS (set 0 to skip)"
 echo "[k3s] AUTO_K3S_URLS=$AUTO_K3S_URLS K3S_MODE=$K3S_MODE K3S_NAMESPACE=$K3S_NAMESPACE"
 echo "[peers] AUTO_PEERS=$AUTO_PEERS NODE_IP=${NODE_IP:-<auto>} PEERS=$PEERS"
