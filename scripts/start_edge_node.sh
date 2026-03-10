@@ -22,6 +22,11 @@ NODE_ID="${NODE_ID:-node-1}"
 NODE_TYPE="${NODE_TYPE:-pi}"
 PEERS="${PEERS:-}"
 
+# Optional: auto-build PEERS from cluster node IP list (testing convenience).
+AUTO_PEERS="${AUTO_PEERS:-0}"
+NODE_IP="${NODE_IP:-}"
+CLUSTER_NODE_IPS="${CLUSTER_NODE_IPS:-}"   # e.g. "192.168.1.177,192.168.1.174,192.168.1.175,192.168.1.176"
+
 # Shared/core services (typically on desktop/server)
 CORE_HOST="${CORE_HOST:-127.0.0.1}"
 THRESHOLD_PORT="${THRESHOLD_PORT:-28000}"
@@ -34,6 +39,15 @@ LOCAL_EST_URL="${LOCAL_EST_URL:-http://127.0.0.1:8000/estimate}"
 LOCAL_DET_URL="${LOCAL_DET_URL:-http://127.0.0.1:8001/detect/eval}"
 LOCAL_FINE_URL="${LOCAL_FINE_URL:-http://127.0.0.1:8002/fine/eval}"
 LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-http://127.0.0.1:9000}"
+
+# Optional: auto-resolve LOCAL_*_URL from k3s services (for host-run edge + k3s microservices).
+AUTO_K3S_URLS="${AUTO_K3S_URLS:-0}"
+K3S_NAMESPACE="${K3S_NAMESPACE:-default}"
+K3S_MODE="${K3S_MODE:-nodeport}"   # nodeport | clusterip
+K3S_NODE_IP="${K3S_NODE_IP:-}"
+K3S_EST_SVC="${K3S_EST_SVC:-threshold-service}"
+K3S_DET_SVC="${K3S_DET_SVC:-svc-detect}"
+K3S_FINE_SVC="${K3S_FINE_SVC:-suc-fine-detect}"
 
 # SERVICE_MODE:
 # - local: each node calls locally running microservices (default for decentralized deployment)
@@ -48,6 +62,45 @@ PRECHECK_URLS="${PRECHECK_URLS:-1}"
 echo "[start] edge node: $NODE_ID ($NODE_TYPE)"
 echo "[conf] host=$HOST port=$PORT peers=$PEERS"
 echo "[conf] core=$CORE_HOST threshold=$THRESHOLD_PORT detect=$DETECT_PORT fine=$FINE_PORT collector=$COLLECTOR_PORT"
+
+if [[ "$AUTO_PEERS" == "1" ]]; then
+  if [[ -z "$NODE_IP" ]]; then
+    NODE_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  if [[ -z "$NODE_IP" ]]; then
+    echo "ERROR: AUTO_PEERS=1 requires NODE_IP (or resolvable hostname -I)." >&2
+    exit 1
+  fi
+  if [[ -z "$CLUSTER_NODE_IPS" ]]; then
+    echo "ERROR: AUTO_PEERS=1 requires CLUSTER_NODE_IPS (comma-separated IP list)." >&2
+    exit 1
+  fi
+  AUTO_BUILT_PEERS=""
+  IFS=',' read -r -a _ips <<< "$CLUSTER_NODE_IPS"
+  for _ip in "${_ips[@]}"; do
+    _ip="$(echo "$_ip" | xargs)"
+    [[ -z "$_ip" ]] && continue
+    [[ "$_ip" == "$NODE_IP" ]] && continue
+    if [[ -z "$AUTO_BUILT_PEERS" ]]; then
+      AUTO_BUILT_PEERS="http://$_ip:$PORT"
+    else
+      AUTO_BUILT_PEERS="${AUTO_BUILT_PEERS},http://$_ip:$PORT"
+    fi
+  done
+  PEERS="$AUTO_BUILT_PEERS"
+fi
+
+if [[ "$AUTO_K3S_URLS" == "1" && "$SERVICE_MODE" == "local" ]]; then
+  if [[ -z "$K3S_NODE_IP" && "$K3S_MODE" == "nodeport" ]]; then
+    K3S_NODE_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  if [[ -z "$K3S_NODE_IP" && "$K3S_MODE" == "nodeport" ]]; then
+    echo "ERROR: AUTO_K3S_URLS=1 requires K3S_NODE_IP for nodeport mode." >&2
+    exit 1
+  fi
+  echo "[k3s] resolving LOCAL_*_URL from services (mode=$K3S_MODE ns=$K3S_NAMESPACE node_ip=${K3S_NODE_IP:-n/a})"
+  eval "$(KUBECTL_BIN=\"${KUBECTL_BIN:-kubectl}\" NAMESPACE=\"$K3S_NAMESPACE\" MODE=\"$K3S_MODE\" NODE_IP=\"$K3S_NODE_IP\" EST_SVC=\"$K3S_EST_SVC\" DET_SVC=\"$K3S_DET_SVC\" FINE_SVC=\"$K3S_FINE_SVC\" \"$ROOT_DIR/scripts/k3s_print_edge_urls.sh\")"
+fi
 
 if [[ "$SERVICE_MODE" == "local" ]]; then
   EST_URL="$LOCAL_EST_URL"
@@ -69,6 +122,8 @@ echo "[mode] SERVICE_MODE=$SERVICE_MODE"
 echo "[paths] DB_PATH=$DB_PATH CSV_DIR=${CSV_DIR:-<auto>}"
 echo "[urls] EST_URL=$EST_URL DET_URL=$DET_URL FINE_URL=$FINE_URL COLLECTOR_URL=$COLLECTOR_URL"
 echo "[precheck] PRECHECK_URLS=$PRECHECK_URLS (set 0 to skip)"
+echo "[k3s] AUTO_K3S_URLS=$AUTO_K3S_URLS K3S_MODE=$K3S_MODE K3S_NAMESPACE=$K3S_NAMESPACE"
+echo "[peers] AUTO_PEERS=$AUTO_PEERS NODE_IP=${NODE_IP:-<auto>} PEERS=$PEERS"
 
 check_url() {
   local name="$1"

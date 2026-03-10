@@ -282,6 +282,37 @@ The script prints:
 Run those exports, then start edge-agent as usual.
 
 The helper script will auto-fallback to `k3s kubectl` and auto-use `/etc/rancher/k3s/k3s.yaml` when available.
+
+
+### 6.3 One-command startup for k3s nodes (recommended)
+
+If all nodes hit the same connection error, enable automatic k3s URL resolution in startup:
+
+```bash
+SERVICE_MODE=local AUTO_K3S_URLS=1 K3S_MODE=nodeport K3S_NAMESPACE=default PORT=9100 NODE_ID=pi2 NODE_TYPE=pi PEERS="http://192.168.1.177:9100,http://192.168.1.175:9100,http://192.168.1.176:9100" DB_PATH=./edge_pi2.db CSV_DIR=./csv_pi2_live bash scripts/start_edge_node.sh
+```
+
+Notes:
+- `AUTO_K3S_URLS=1` makes `start_edge_node.sh` call `scripts/k3s_print_edge_urls.sh` internally.
+- For `K3S_MODE=nodeport`, it uses node IP automatically (`hostname -I` first IP).
+- You can still explicitly set `K3S_NODE_IP=...` or `LOCAL_*_URL=...` if needed.
+
+
+## 7) Do I need to change PEERS when testing?
+
+- Single-node test: no peers needed (`PEERS=""` is fine).
+- Multi-node test: peers must be the other edge node URLs.
+
+To avoid manual peer editing on every node, use auto peer generation:
+
+```bash
+SERVICE_MODE=local AUTO_PEERS=1 CLUSTER_NODE_IPS="192.168.1.177,192.168.1.174,192.168.1.175,192.168.1.176" NODE_IP=192.168.1.174 PORT=9100 NODE_ID=pi2 NODE_TYPE=pi AUTO_K3S_URLS=1 K3S_MODE=nodeport K3S_NAMESPACE=default DB_PATH=./edge_pi2.db CSV_DIR=./csv_pi2_live bash scripts/start_edge_node.sh
+```
+
+This will auto-build:
+- `PEERS=http://192.168.1.177:9100,http://192.168.1.175:9100,http://192.168.1.176:9100`
+
+(automatically excludes current `NODE_IP`).
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
