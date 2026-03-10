@@ -33,6 +33,12 @@ you should run edge-agent in `SERVICE_MODE=local` so it calls local services dir
 
 In this mode, `CORE_HOST` is not used for compute APIs.
 
+If your local microservices are not on default ports, override startup vars:
+- `LOCAL_EST_URL` (default `http://127.0.0.1:8000/estimate`)
+- `LOCAL_DET_URL` (default `http://127.0.0.1:8001/detect/eval`)
+- `LOCAL_FINE_URL` (default `http://127.0.0.1:8002/fine/eval`)
+
+## 2) Start each edge node (on each device)
 ## 2) Start each edge node (on each device)
 ## 2) Start shared services (desktop/server)
 
@@ -173,6 +179,109 @@ SPEED=20 SLOT_SECONDS=5 PI7_URL=http://192.168.1.177:9100 PI7_DATASET=dataset/no
 ```
 
 ## 4) Verify offloading happened
+
+On each node check local DB has offload rows:
+
+```bash
+python3 - <<'PY'
+import sqlite3
+conn = sqlite3.connect('edge_pi7.db')
+cur = conn.cursor()
+cur.execute('select count(*) from fine_result where offloaded=1')
+print('offloaded rows:', cur.fetchone()[0])
+cur.execute('select count(*) from fine_result where origin!=executed_on')
+print('remote execution rows:', cur.fetchone()[0])
+PY
+```
+
+If both are >0 across nodes, cross-node offloading is working.
+
+Note: edge-agent now writes CSV continuously during runtime.
+- Default CSV dir: `${DB_PATH without .db}_csv`
+- Files: `baseline.csv`, `detect_result.csv`, `fine_result.csv`
+- You can override with `CSV_DIR=...` in `scripts/start_edge_node.sh` startup env.
+
+
+## 5) Troubleshooting: detect_result shows ConnectError
+
+If CSV/DB shows many rows like `ConnectError('All connection attempts failed')`, edge-agent cannot reach local detect/fine/estimate URLs.
+
+Check on each node:
+
+```bash
+curl -sS http://127.0.0.1:8000/estimate || true
+curl -sS http://127.0.0.1:8001/detect/eval || true
+curl -sS http://127.0.0.1:8002/fine/eval || true
+
+# if all three fail, verify which ports are actually listening:
+ss -lntp | grep -E ':8000|:8001|:8002|:28000|:28001|:28002' || true
+docker ps --format 'table {{.Names}}	{{.Ports}}' || true
+```
+
+
+If your curl output is exactly:
+- `Failed to connect to 127.0.0.1 port 8000`
+- `Failed to connect to 127.0.0.1 port 8001`
+- `Failed to connect to 127.0.0.1 port 8002`
+
+then local microservices are not bound on those ports on that node. Point edge-agent to the real ports via `LOCAL_*_URL`, or start microservices on 8000/8001/8002.
+
+If your local service ports/routes are different, start edge with explicit overrides:
+
+```bash
+SERVICE_MODE=local PORT=9100 NODE_ID=pi2 NODE_TYPE=pi \
+PEERS="http://192.168.1.177:9100,http://192.168.1.175:9100,http://192.168.1.176:9100" \
+DB_PATH=./edge_pi2.db CSV_DIR=./csv_pi2_live \
+LOCAL_EST_URL=http://127.0.0.1:28000/ingest \
+LOCAL_DET_URL=http://127.0.0.1:28001/detect/eval \
+LOCAL_FINE_URL=http://127.0.0.1:28002/fine/eval \
+bash scripts/start_edge_node.sh
+```
+
+`start_edge_node.sh` now performs fail-fast URL checks before launching uvicorn, so misconfigured URLs are reported immediately.
+
+
+## 6) k3s deployment note (you said you use k3s)
+
+When running edge-agent on host OS and microservices in k3s, `127.0.0.1:8000/8001/8002` usually does not work.
+You must point edge-agent to k3s Service endpoints via `LOCAL_*_URL`.
+
+### 6.1 Inspect service exposure
+
+If you see `The connection to the server localhost:8080 was refused`, your kubeconfig is not loaded.
+Use one of these first:
+
+```bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+kubectl -n default get svc -o wide
+
+# or directly with k3s wrapper
+k3s kubectl -n default get svc -o wide
+```
+
+If services are `ClusterIP`, use cluster IP URLs.
+If services are `NodePort`, use node IP + nodePort URLs.
+
+### 6.2 Auto-generate LOCAL_*_URL exports
+
+```bash
+# clusterIP mode (default)
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml NAMESPACE=default EST_SVC=threshold-service DET_SVC=svc-detect FINE_SVC=suc-fine-detect \
+  scripts/k3s_print_edge_urls.sh
+
+# nodePort mode
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml MODE=nodeport NODE_IP=192.168.1.174 NAMESPACE=default EST_SVC=threshold-service DET_SVC=svc-detect FINE_SVC=suc-fine-detect \
+  scripts/k3s_print_edge_urls.sh
+```
+
+The script prints:
+- `export LOCAL_EST_URL=...`
+- `export LOCAL_DET_URL=...`
+- `export LOCAL_FINE_URL=...`
+
+Run those exports, then start edge-agent as usual.
+
+The helper script will auto-fallback to `k3s kubectl` and auto-use `/etc/rancher/k3s/k3s.yaml` when available.
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi3.db scripts/start_edge_node.sh
