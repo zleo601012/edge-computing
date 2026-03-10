@@ -313,6 +313,17 @@ This will auto-build:
 - `PEERS=http://192.168.1.177:9100,http://192.168.1.175:9100,http://192.168.1.176:9100`
 
 (automatically excludes current `NODE_IP`).
+
+
+### 7.1 If LOCAL_*_URL seems ignored
+
+Use a **single-line** command (avoid copy/paste line-break artifacts), for example:
+
+```bash
+SERVICE_MODE=local AUTO_K3S_URLS=0 AUTO_PEERS=1 CLUSTER_NODE_IPS="192.168.1.177,192.168.1.174,192.168.1.175,192.168.1.176" NODE_IP=192.168.1.177 PORT=9100 NODE_ID=pi7 NODE_TYPE=pi DB_PATH=./edge_pi7.db CSV_DIR=./csv_pi7_live LOCAL_EST_URL=http://127.0.0.1:18000/ingest LOCAL_DET_URL=http://127.0.0.1:18001/detect/eval LOCAL_FINE_URL=http://127.0.0.1:18002/fine/eval LOCAL_COLLECTOR_URL=http://127.0.0.1:19000 bash scripts/start_edge_node.sh
+```
+
+`start_edge_node.sh` also accepts `EST_URL/DET_URL/FINE_URL/COLLECTOR_URL` as compatibility aliases.
 CORE_HOST=192.168.1.169 PORT=${EDGE_PORT} NODE_ID=pi3 NODE_TYPE=pi \
 PEERS="http://192.168.1.167:${EDGE_PORT},http://192.168.1.174:${EDGE_PORT},http://192.168.1.176:${EDGE_PORT}" \
 DB_PATH=./edge_pi3.db scripts/start_edge_node.sh

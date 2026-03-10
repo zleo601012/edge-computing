@@ -35,6 +35,12 @@ FINE_PORT="${FINE_PORT:-28002}"
 COLLECTOR_PORT="${COLLECTOR_PORT:-29000}"
 
 # Optional per-node local microservice URLs (used when SERVICE_MODE=local).
+# Compatibility: if EST_URL/DET_URL/FINE_URL/COLLECTOR_URL are already set by user,
+# use them as LOCAL_* defaults to avoid accidental fallback to 8000/8001/8002.
+LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-http://127.0.0.1:8000/estimate}}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-${DET_URL:-http://127.0.0.1:8001/detect/eval}}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-${FINE_URL:-http://127.0.0.1:8002/fine/eval}}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-${COLLECTOR_URL:-http://127.0.0.1:9000}}"
 LOCAL_EST_URL="${LOCAL_EST_URL:-http://127.0.0.1:8000/estimate}"
 LOCAL_DET_URL="${LOCAL_DET_URL:-http://127.0.0.1:8001/detect/eval}"
 LOCAL_FINE_URL="${LOCAL_FINE_URL:-http://127.0.0.1:8002/fine/eval}"
@@ -98,6 +104,22 @@ if [[ "$AUTO_K3S_URLS" == "1" && "$SERVICE_MODE" == "local" ]]; then
     echo "ERROR: AUTO_K3S_URLS=1 requires K3S_NODE_IP for nodeport mode." >&2
     exit 1
   fi
+  if [[ ! -x "$ROOT_DIR/scripts/k3s_print_edge_urls.sh" ]]; then
+    echo "ERROR: missing helper script: $ROOT_DIR/scripts/k3s_print_edge_urls.sh" >&2
+    echo "Hint: sync latest repo changes or set AUTO_K3S_URLS=0 and provide LOCAL_*_URL manually." >&2
+    exit 1
+  fi
+  echo "[k3s] resolving LOCAL_*_URL from services (mode=$K3S_MODE ns=$K3S_NAMESPACE node_ip=${K3S_NODE_IP:-n/a})"
+  eval "$(
+    KUBECTL_BIN="${KUBECTL_BIN:-kubectl}" \
+    NAMESPACE="$K3S_NAMESPACE" \
+    MODE="$K3S_MODE" \
+    NODE_IP="$K3S_NODE_IP" \
+    EST_SVC="$K3S_EST_SVC" \
+    DET_SVC="$K3S_DET_SVC" \
+    FINE_SVC="$K3S_FINE_SVC" \
+    "$ROOT_DIR/scripts/k3s_print_edge_urls.sh"
+  )"
   echo "[k3s] resolving LOCAL_*_URL from services (mode=$K3S_MODE ns=$K3S_NAMESPACE node_ip=${K3S_NODE_IP:-n/a})"
   eval "$(KUBECTL_BIN=\"${KUBECTL_BIN:-kubectl}\" NAMESPACE=\"$K3S_NAMESPACE\" MODE=\"$K3S_MODE\" NODE_IP=\"$K3S_NODE_IP\" EST_SVC=\"$K3S_EST_SVC\" DET_SVC=\"$K3S_DET_SVC\" FINE_SVC=\"$K3S_FINE_SVC\" \"$ROOT_DIR/scripts/k3s_print_edge_urls.sh\")"
 fi
