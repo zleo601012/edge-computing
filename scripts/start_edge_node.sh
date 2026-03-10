@@ -16,6 +16,7 @@ if [[ -z "$PORT" ]]; then
   echo "ERROR: PORT is required (do not assume 29101). Example: PORT=9100 scripts/start_edge_node.sh" >&2
   exit 1
 fi
+PORT="${PORT:-29101}"
 
 NODE_ID="${NODE_ID:-node-1}"
 NODE_TYPE="${NODE_TYPE:-pi}"
@@ -36,6 +37,8 @@ COLLECTOR_PORT="${COLLECTOR_PORT:-29000}"
 # Optional per-node local microservice URLs (used when SERVICE_MODE=local).
 # Compatibility: EST_URL/DET_URL/FINE_URL/COLLECTOR_URL should always win over LOCAL_*.
 # This avoids stale exported LOCAL_* values silently overriding the command-line EST_URL.
+# Compatibility: if EST_URL/DET_URL/FINE_URL/COLLECTOR_URL are already set by user,
+# use them as LOCAL_* defaults to avoid accidental fallback to 8000/8001/8002.
 # Shortcut profile: LOCAL_PROFILE=18000 -> 18000/18001/18002 (+ collector 19000).
 LOCAL_PROFILE="${LOCAL_PROFILE:-default}"
 if [[ "$LOCAL_PROFILE" == "18000" ]]; then
@@ -45,6 +48,7 @@ if [[ "$LOCAL_PROFILE" == "18000" ]]; then
   _DEFAULT_COLLECTOR_URL="http://127.0.0.1:19000"
 else
   _DEFAULT_EST_URL="http://127.0.0.1:8000/ingest"
+  _DEFAULT_EST_URL="http://127.0.0.1:8000/estimate"
   _DEFAULT_DET_URL="http://127.0.0.1:8001/detect/eval"
   _DEFAULT_FINE_URL="http://127.0.0.1:8002/fine/eval"
   _DEFAULT_COLLECTOR_URL="http://127.0.0.1:9000"
@@ -60,6 +64,18 @@ if [[ -n "${EST_URL:-}" ]]; then LOCAL_EST_URL="$EST_URL"; fi
 if [[ -n "${DET_URL:-}" ]]; then LOCAL_DET_URL="$DET_URL"; fi
 if [[ -n "${FINE_URL:-}" ]]; then LOCAL_FINE_URL="$FINE_URL"; fi
 if [[ -n "${COLLECTOR_URL:-}" ]]; then LOCAL_COLLECTOR_URL="$COLLECTOR_URL"; fi
+LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-${_DEFAULT_EST_URL}}}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-${DET_URL:-${_DEFAULT_DET_URL}}}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-${FINE_URL:-${_DEFAULT_FINE_URL}}}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-${COLLECTOR_URL:-${_DEFAULT_COLLECTOR_URL}}}"
+LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-http://127.0.0.1:8000/estimate}}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-${DET_URL:-http://127.0.0.1:8001/detect/eval}}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-${FINE_URL:-http://127.0.0.1:8002/fine/eval}}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-${COLLECTOR_URL:-http://127.0.0.1:9000}}"
+LOCAL_EST_URL="${LOCAL_EST_URL:-http://127.0.0.1:8000/estimate}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-http://127.0.0.1:8001/detect/eval}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-http://127.0.0.1:8002/fine/eval}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-http://127.0.0.1:9000}"
 
 # Optional: auto-resolve LOCAL_*_URL from k3s services (for host-run edge + k3s microservices).
 AUTO_K3S_URLS="${AUTO_K3S_URLS:-0}"
@@ -135,6 +151,8 @@ if [[ "$AUTO_K3S_URLS" == "1" && "$SERVICE_MODE" == "local" ]]; then
     FINE_SVC="$K3S_FINE_SVC" \
     "$ROOT_DIR/scripts/k3s_print_edge_urls.sh"
   )"
+  echo "[k3s] resolving LOCAL_*_URL from services (mode=$K3S_MODE ns=$K3S_NAMESPACE node_ip=${K3S_NODE_IP:-n/a})"
+  eval "$(KUBECTL_BIN=\"${KUBECTL_BIN:-kubectl}\" NAMESPACE=\"$K3S_NAMESPACE\" MODE=\"$K3S_MODE\" NODE_IP=\"$K3S_NODE_IP\" EST_SVC=\"$K3S_EST_SVC\" DET_SVC=\"$K3S_DET_SVC\" FINE_SVC=\"$K3S_FINE_SVC\" \"$ROOT_DIR/scripts/k3s_print_edge_urls.sh\")"
 fi
 
 if [[ "$SERVICE_MODE" == "local" ]]; then
@@ -142,6 +160,10 @@ if [[ "$SERVICE_MODE" == "local" ]]; then
   DET_URL="$LOCAL_DET_URL"
   FINE_URL="$LOCAL_FINE_URL"
   COLLECTOR_URL="$LOCAL_COLLECTOR_URL"
+  EST_URL="http://127.0.0.1:8000/estimate"
+  DET_URL="http://127.0.0.1:8001/detect/eval"
+  FINE_URL="http://127.0.0.1:8002/fine/eval"
+  COLLECTOR_URL="http://127.0.0.1:9000"
 else
   EST_URL="http://$CORE_HOST:$THRESHOLD_PORT/ingest"
   DET_URL="http://$CORE_HOST:$DETECT_PORT/detect/eval"
@@ -209,5 +231,10 @@ env \
   COLLECTOR_URL="$COLLECTOR_URL" \
   DB_PATH="$DB_PATH" \
   CSV_DIR="$CSV_DIR" \
+  DET_URL="http://$CORE_HOST:$DETECT_PORT/detect/eval" \
+  EST_URL="http://$CORE_HOST:$THRESHOLD_PORT/ingest" \
+  FINE_URL="http://$CORE_HOST:$FINE_PORT/fine/eval" \
+  COLLECTOR_URL="http://$CORE_HOST:$COLLECTOR_PORT" \
+  DB_PATH="$DB_PATH" \
   UPLOAD_EVERY="$UPLOAD_EVERY" \
   "$PYTHON_BIN" -m uvicorn offload_system.edge_agent.app:app --host "$HOST" --port "$PORT"
