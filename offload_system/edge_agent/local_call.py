@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
@@ -72,10 +73,34 @@ class LocalCaller:
 
         return values
 
+    @staticmethod
+    def _normalize_ts(v: Any) -> Optional[float]:
+        """
+        Convert optional ts field to float seconds when possible.
+
+        svc_detect/suc_fine_detect expect numeric ts (Optional[float]).
+        Replayed CSV payloads often carry ts as formatted strings, which would
+        otherwise cause HTTP 422 validation errors.
+        """
+        fv = LocalCaller._to_float(v)
+        if fv is not None:
+            return fv
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M", "%Y-%m-%d %H:%M"):
+                try:
+                    return float(datetime.strptime(s, fmt).timestamp())
+                except ValueError:
+                    continue
+        return None
+
     async def call_estimate(self, slot: int, trace_id: str, payload: Dict[str, Any]) -> Tuple[bool, Dict[str, Any], float, str]:
         values = self._extract_values(payload)
         data = {
             "node_id": str(payload.get("node_id") or self.cfg.node_id),
+            "ts": self._normalize_ts(payload.get("ts")) if payload.get("ts") is not None else float(slot),
             "ts": payload.get("ts", slot),
             "values": values,
         }
@@ -87,6 +112,7 @@ class LocalCaller:
         data = {
             "node_id": str(payload.get("node_id") or self.cfg.node_id),
             "slot_id": str(slot),
+            "ts": self._normalize_ts(payload.get("ts")),
             "ts": payload.get("ts"),
             "values": values,
         }
@@ -98,6 +124,7 @@ class LocalCaller:
             "event_id": str(payload.get("event_id") or trace_id),
             "node_type": str(payload.get("node_type") or self.cfg.node_type),
             "slot_id": str(payload.get("slot_id") or slot),
+            "ts": self._normalize_ts(payload.get("ts")),
             "ts": payload.get("ts"),
             "values": values,
             "exceed_ratio": payload.get("exceed_ratio") if isinstance(payload.get("exceed_ratio"), dict) else {},

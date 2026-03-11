@@ -35,6 +35,9 @@ FINE_PORT="${FINE_PORT:-28002}"
 COLLECTOR_PORT="${COLLECTOR_PORT:-29000}"
 
 # Optional per-node local microservice URLs (used when SERVICE_MODE=local).
+# Compatibility: EST_URL/DET_URL/FINE_URL/COLLECTOR_URL should always win over LOCAL_*.
+# This avoids stale exported LOCAL_* values silently overriding the command-line EST_URL.
+# Shortcut profile: LOCAL_PROFILE=18000 -> 18000/18001/18002 (+ collector 19000).
 LOCAL_PROFILE="${LOCAL_PROFILE:-default}"
 if [[ "$LOCAL_PROFILE" == "18000" ]]; then
   _DEFAULT_EST_URL="http://127.0.0.1:18000/ingest"
@@ -48,6 +51,22 @@ else
   _DEFAULT_FINE_URL="http://127.0.0.1:8002/fine/eval"
   _DEFAULT_COLLECTOR_URL="http://127.0.0.1:9000"
 fi
+LOCAL_EST_URL="${LOCAL_EST_URL:-${_DEFAULT_EST_URL}}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-${_DEFAULT_DET_URL}}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-${_DEFAULT_FINE_URL}}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-${_DEFAULT_COLLECTOR_URL}}"
+
+# Explicit EST_URL/DET_URL/FINE_URL/COLLECTOR_URL (often passed inline before bash)
+# must override LOCAL_* to match user expectation.
+if [[ -n "${EST_URL:-}" ]]; then LOCAL_EST_URL="$EST_URL"; fi
+if [[ -n "${DET_URL:-}" ]]; then LOCAL_DET_URL="$DET_URL"; fi
+if [[ -n "${FINE_URL:-}" ]]; then LOCAL_FINE_URL="$FINE_URL"; fi
+if [[ -n "${COLLECTOR_URL:-}" ]]; then LOCAL_COLLECTOR_URL="$COLLECTOR_URL"; fi
+
+# Optional: auto-resolve LOCAL_*_URL from k3s services (for host-run edge + k3s microservices).
+AUTO_K3S_URLS="${AUTO_K3S_URLS:-0}"
+K3S_NAMESPACE="${K3S_NAMESPACE:-default}"
+K3S_MODE="${K3S_MODE:-nodeport}"   # nodeport | clusterip
 
 # 优先级：环境变量 > 默认值
 LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-${_DEFAULT_EST_URL}}}"
@@ -64,6 +83,9 @@ K3S_EST_SVC="${K3S_EST_SVC:-threshold-service}"
 K3S_DET_SVC="${K3S_DET_SVC:-svc-detect}"
 K3S_FINE_SVC="${K3S_FINE_SVC:-suc-fine-detect}"
 
+# SERVICE_MODE:
+# - local: each node calls locally running microservices (default for decentralized deployment)
+# - remote: edge calls services on CORE_HOST
 SERVICE_MODE="${SERVICE_MODE:-local}"
 
 DB_PATH="${DB_PATH:-./edge_agent_${NODE_ID}.db}"
@@ -72,11 +94,19 @@ UPLOAD_EVERY="${UPLOAD_EVERY:-2}"
 PRECHECK_URLS="${PRECHECK_URLS:-1}"
 
 echo "[start] edge node: $NODE_ID ($NODE_TYPE)"
+echo "[conf] host=$HOST port=$PORT peers=$PEERS"
+echo "[conf] core=$CORE_HOST threshold=$THRESHOLD_PORT detect=$DETECT_PORT fine=$FINE_PORT collector=$COLLECTOR_PORT"
 
 if [[ "$AUTO_PEERS" == "1" ]]; then
   if [[ -z "$NODE_IP" ]]; then
     NODE_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
   fi
+  if [[ -z "$NODE_IP" ]]; then
+    echo "ERROR: AUTO_PEERS=1 requires NODE_IP (or resolvable hostname -I)." >&2
+    exit 1
+  fi
+  if [[ -z "$CLUSTER_NODE_IPS" ]]; then
+    echo "ERROR: AUTO_PEERS=1 requires CLUSTER_NODE_IPS (comma-separated IP list)." >&2
   if [[ -z "$CLUSTER_NODE_IPS" ]]; then
     echo "ERROR: AUTO_PEERS=1 requires CLUSTER_NODE_IPS." >&2
     exit 1
@@ -85,6 +115,8 @@ if [[ "$AUTO_PEERS" == "1" ]]; then
   IFS=',' read -r -a _ips <<< "$CLUSTER_NODE_IPS"
   for _ip in "${_ips[@]}"; do
     _ip="$(echo "$_ip" | xargs)"
+    [[ -z "$_ip" ]] && continue
+    [[ "$_ip" == "$NODE_IP" ]] && continue
     [[ -z "$_ip" || "$_ip" == "$NODE_IP" ]] && continue
     if [[ -z "$AUTO_BUILT_PEERS" ]]; then
       AUTO_BUILT_PEERS="http://$_ip:$PORT"
@@ -96,6 +128,31 @@ if [[ "$AUTO_PEERS" == "1" ]]; then
 fi
 
 if [[ "$AUTO_K3S_URLS" == "1" && "$SERVICE_MODE" == "local" ]]; then
+  if [[ -z "$K3S_NODE_IP" && "$K3S_MODE" == "nodeport" ]]; then
+    K3S_NODE_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  if [[ -z "$K3S_NODE_IP" && "$K3S_MODE" == "nodeport" ]]; then
+    echo "ERROR: AUTO_K3S_URLS=1 requires K3S_NODE_IP for nodeport mode." >&2
+    exit 1
+  fi
+  if [[ ! -x "$ROOT_DIR/scripts/k3s_print_edge_urls.sh" ]]; then
+    echo "ERROR: missing helper script: $ROOT_DIR/scripts/k3s_print_edge_urls.sh" >&2
+    echo "Hint: sync latest repo changes or set AUTO_K3S_URLS=0 and provide LOCAL_*_URL manually." >&2
+    exit 1
+  fi
+  echo "[k3s] resolving LOCAL_*_URL from services (mode=$K3S_MODE ns=$K3S_NAMESPACE node_ip=${K3S_NODE_IP:-n/a})"
+  eval "$(
+    KUBECTL_BIN="${KUBECTL_BIN:-kubectl}" \
+    NAMESPACE="$K3S_NAMESPACE" \
+    MODE="$K3S_MODE" \
+    NODE_IP="$K3S_NODE_IP" \
+    EST_SVC="$K3S_EST_SVC" \
+    DET_SVC="$K3S_DET_SVC" \
+    FINE_SVC="$K3S_FINE_SVC" \
+    "$ROOT_DIR/scripts/k3s_print_edge_urls.sh"
+  )"
+fi
+
   echo "[k3s] resolving LOCAL_*_URL from services..."
   eval "$(KUBECTL_BIN=\"${KUBECTL_BIN:-kubectl}\" NAMESPACE=\"$K3S_NAMESPACE\" MODE=\"$K3S_MODE\" NODE_IP=\"$K3S_NODE_IP\" EST_SVC=\"$K3S_EST_SVC\" DET_SVC=\"$K3S_DET_SVC\" FINE_SVC=\"$K3S_FINE_SVC\" \"$ROOT_DIR/scripts/k3s_print_edge_urls.sh\")"
 fi
@@ -113,6 +170,13 @@ else
   COLLECTOR_URL="http://$CORE_HOST:$COLLECTOR_PORT"
 fi
 
+echo "[mode] SERVICE_MODE=$SERVICE_MODE"
+echo "[paths] DB_PATH=$DB_PATH CSV_DIR=${CSV_DIR:-<auto>}"
+echo "[urls] EST_URL=$EST_URL DET_URL=$DET_URL FINE_URL=$FINE_URL COLLECTOR_URL=$COLLECTOR_URL"
+echo "[profile] LOCAL_PROFILE=$LOCAL_PROFILE"
+echo "[precheck] PRECHECK_URLS=$PRECHECK_URLS (set 0 to skip)"
+echo "[k3s] AUTO_K3S_URLS=$AUTO_K3S_URLS K3S_MODE=$K3S_MODE K3S_NAMESPACE=$K3S_NAMESPACE"
+echo "[peers] AUTO_PEERS=$AUTO_PEERS NODE_IP=${NODE_IP:-<auto>} PEERS=$PEERS"
 echo "[urls] EST_URL=$EST_URL DET_URL=$DET_URL FINE_URL=$FINE_URL"
 
 check_url() {
@@ -122,6 +186,18 @@ check_url() {
 import socket
 import sys
 from urllib.parse import urlparse
+
+name = sys.argv[1]
+url = sys.argv[2]
+u = urlparse(url)
+host = u.hostname
+port = u.port
+if not host:
+    print(f"ERROR: {name} invalid url: {url}", file=sys.stderr)
+    sys.exit(2)
+if port is None:
+    port = 443 if (u.scheme or '').lower() == 'https' else 80
+
 name, url = sys.argv[1], sys.argv[2]
 u = urlparse(url)
 host, port = u.hostname, u.port or (443 if u.scheme == 'https' else 80)
@@ -130,6 +206,18 @@ sock.settimeout(2.0)
 try:
     sock.connect((host, int(port)))
 except Exception as e:
+    print(f"ERROR: {name} tcp unreachable: {host}:{port} ({e})", file=sys.stderr)
+    sys.exit(1)
+finally:
+    try:
+        sock.close()
+    except Exception:
+        pass
+PY
+}
+
+# Fail fast on bad microservice endpoints to avoid endless ConnectError rows.
+# TCP precheck is used because some services only accept POST and may return 405 on GET.
     print(f"ERROR: {name} unreachable: {host}:{port} ({e})", file=sys.stderr)
     sys.exit(1)
 finally:
