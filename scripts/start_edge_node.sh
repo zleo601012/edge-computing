@@ -16,6 +16,7 @@ if [[ -z "$PORT" ]]; then
   echo "ERROR: PORT is required (do not assume 29101). Example: PORT=9100 scripts/start_edge_node.sh" >&2
   exit 1
 fi
+PORT="${PORT:-29101}"
 
 NODE_ID="${NODE_ID:-node-1}"
 NODE_TYPE="${NODE_TYPE:-pi}"
@@ -44,6 +45,7 @@ if [[ "$LOCAL_PROFILE" == "18000" ]]; then
   _DEFAULT_FINE_URL="http://127.0.0.1:18002/fine/eval"
   _DEFAULT_COLLECTOR_URL="http://127.0.0.1:19000"
 else
+  # 修正：将默认路径由 /estimate 改为 /ingest
   _DEFAULT_EST_URL="http://127.0.0.1:8000/ingest"
   _DEFAULT_DET_URL="http://127.0.0.1:8001/detect/eval"
   _DEFAULT_FINE_URL="http://127.0.0.1:8002/fine/eval"
@@ -65,6 +67,17 @@ if [[ -n "${COLLECTOR_URL:-}" ]]; then LOCAL_COLLECTOR_URL="$COLLECTOR_URL"; fi
 AUTO_K3S_URLS="${AUTO_K3S_URLS:-0}"
 K3S_NAMESPACE="${K3S_NAMESPACE:-default}"
 K3S_MODE="${K3S_MODE:-nodeport}"   # nodeport | clusterip
+
+# 优先级：环境变量 > 默认值
+LOCAL_EST_URL="${LOCAL_EST_URL:-${EST_URL:-${_DEFAULT_EST_URL}}}"
+LOCAL_DET_URL="${LOCAL_DET_URL:-${DET_URL:-${_DEFAULT_DET_URL}}}"
+LOCAL_FINE_URL="${LOCAL_FINE_URL:-${FINE_URL:-${_DEFAULT_FINE_URL}}}"
+LOCAL_COLLECTOR_URL="${LOCAL_COLLECTOR_URL:-${COLLECTOR_URL:-${_DEFAULT_COLLECTOR_URL}}}"
+
+# Optional: auto-resolve LOCAL_*_URL from k3s services
+AUTO_K3S_URLS="${AUTO_K3S_URLS:-0}"
+K3S_NAMESPACE="${K3S_NAMESPACE:-default}"
+K3S_MODE="${K3S_MODE:-nodeport}"
 K3S_NODE_IP="${K3S_NODE_IP:-}"
 K3S_EST_SVC="${K3S_EST_SVC:-threshold-service}"
 K3S_DET_SVC="${K3S_DET_SVC:-svc-detect}"
@@ -94,6 +107,8 @@ if [[ "$AUTO_PEERS" == "1" ]]; then
   fi
   if [[ -z "$CLUSTER_NODE_IPS" ]]; then
     echo "ERROR: AUTO_PEERS=1 requires CLUSTER_NODE_IPS (comma-separated IP list)." >&2
+  if [[ -z "$CLUSTER_NODE_IPS" ]]; then
+    echo "ERROR: AUTO_PEERS=1 requires CLUSTER_NODE_IPS." >&2
     exit 1
   fi
   AUTO_BUILT_PEERS=""
@@ -102,6 +117,7 @@ if [[ "$AUTO_PEERS" == "1" ]]; then
     _ip="$(echo "$_ip" | xargs)"
     [[ -z "$_ip" ]] && continue
     [[ "$_ip" == "$NODE_IP" ]] && continue
+    [[ -z "$_ip" || "$_ip" == "$NODE_IP" ]] && continue
     if [[ -z "$AUTO_BUILT_PEERS" ]]; then
       AUTO_BUILT_PEERS="http://$_ip:$PORT"
     else
@@ -137,6 +153,11 @@ if [[ "$AUTO_K3S_URLS" == "1" && "$SERVICE_MODE" == "local" ]]; then
   )"
 fi
 
+  echo "[k3s] resolving LOCAL_*_URL from services..."
+  eval "$(KUBECTL_BIN=\"${KUBECTL_BIN:-kubectl}\" NAMESPACE=\"$K3S_NAMESPACE\" MODE=\"$K3S_MODE\" NODE_IP=\"$K3S_NODE_IP\" EST_SVC=\"$K3S_EST_SVC\" DET_SVC=\"$K3S_DET_SVC\" FINE_SVC=\"$K3S_FINE_SVC\" \"$ROOT_DIR/scripts/k3s_print_edge_urls.sh\")"
+fi
+
+# 关键修正：移除此处对 EST_URL/DET_URL 等的二次硬编码覆盖
 if [[ "$SERVICE_MODE" == "local" ]]; then
   EST_URL="$LOCAL_EST_URL"
   DET_URL="$LOCAL_DET_URL"
@@ -156,6 +177,7 @@ echo "[profile] LOCAL_PROFILE=$LOCAL_PROFILE"
 echo "[precheck] PRECHECK_URLS=$PRECHECK_URLS (set 0 to skip)"
 echo "[k3s] AUTO_K3S_URLS=$AUTO_K3S_URLS K3S_MODE=$K3S_MODE K3S_NAMESPACE=$K3S_NAMESPACE"
 echo "[peers] AUTO_PEERS=$AUTO_PEERS NODE_IP=${NODE_IP:-<auto>} PEERS=$PEERS"
+echo "[urls] EST_URL=$EST_URL DET_URL=$DET_URL FINE_URL=$FINE_URL"
 
 check_url() {
   local name="$1"
@@ -176,6 +198,9 @@ if not host:
 if port is None:
     port = 443 if (u.scheme or '').lower() == 'https' else 80
 
+name, url = sys.argv[1], sys.argv[2]
+u = urlparse(url)
+host, port = u.hostname, u.port or (443 if u.scheme == 'https' else 80)
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.settimeout(2.0)
 try:
@@ -193,12 +218,20 @@ PY
 
 # Fail fast on bad microservice endpoints to avoid endless ConnectError rows.
 # TCP precheck is used because some services only accept POST and may return 405 on GET.
+    print(f"ERROR: {name} unreachable: {host}:{port} ({e})", file=sys.stderr)
+    sys.exit(1)
+finally:
+    sock.close()
+PY
+}
+
 if [[ "$PRECHECK_URLS" != "0" ]]; then
   check_url estimate "$EST_URL"
   check_url detect "$DET_URL"
   check_url fine "$FINE_URL"
 fi
 
+# 关键修正：在 env 中仅保留动态变量，删除末尾重复的 CORE_HOST 覆盖行
 env \
   NODE_ID="$NODE_ID" \
   NODE_TYPE="$NODE_TYPE" \
