@@ -101,6 +101,7 @@ class LocalCaller:
         data = {
             "node_id": str(payload.get("node_id") or self.cfg.node_id),
             "ts": self._normalize_ts(payload.get("ts")) if payload.get("ts") is not None else float(slot),
+            "ts": payload.get("ts", slot),
             "values": values,
         }
         return await self._post(self.cfg.est_url, data)
@@ -112,6 +113,7 @@ class LocalCaller:
             "node_id": str(payload.get("node_id") or self.cfg.node_id),
             "slot_id": str(slot),
             "ts": self._normalize_ts(payload.get("ts")),
+            "ts": payload.get("ts"),
             "values": values,
         }
         return await self._post(self.cfg.det_url, data)
@@ -123,6 +125,7 @@ class LocalCaller:
             "node_type": str(payload.get("node_type") or self.cfg.node_type),
             "slot_id": str(payload.get("slot_id") or slot),
             "ts": self._normalize_ts(payload.get("ts")),
+            "ts": payload.get("ts"),
             "values": values,
             "exceed_ratio": payload.get("exceed_ratio") if isinstance(payload.get("exceed_ratio"), dict) else {},
         }
