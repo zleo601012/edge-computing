@@ -182,6 +182,20 @@ echo "[urls] EST_URL=$EST_URL DET_URL=$DET_URL FINE_URL=$FINE_URL"
 check_url() {
   local name="$1"
   local url="$2"
+  "$PYTHON_BIN" -c 'import socket, sys; from urllib.parse import urlparse; name=sys.argv[1]; url=sys.argv[2]; u=urlparse(url); host=u.hostname; port=u.port if u.port is not None else (443 if (u.scheme or "").lower()=="https" else 80)
+if not host: print(f"ERROR: {name} invalid url: {url}", file=sys.stderr) or sys.exit(2)
+s=socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(2.0)
+try:
+    s.connect((host, int(port)))
+except Exception as e:
+    print(f"ERROR: {name} tcp unreachable: {host}:{port} ({e})", file=sys.stderr); sys.exit(1)
+finally:
+    s.close()' "$name" "$url"
+}
+
+
+# Fail fast on bad microservice endpoints to avoid endless ConnectError rows.
+# TCP precheck is used because some services only accept POST and may return 405 on GET.
   "$PYTHON_BIN" - "$name" "$url" <<'PY'
 import socket
 import sys
