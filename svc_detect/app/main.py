@@ -51,11 +51,30 @@ def detect_eval(req: DetectRequest):
             thresholds = None
 
     if not thresholds:
-        thresholds, tmeta = load_thresholds(req.slot_id)
+        try:
+            thresholds, tmeta = load_thresholds(req.slot_id)
+        except Exception as e:
+            # local fallback DB may not have legacy thresholds table.
+            thresholds, tmeta = {}, {"stale": True, "reason": f"local_threshold_load_error: {e!r}"}
+
         if thresholds:
             tmeta = {"source": "local_db", **tmeta}
         else:
-            raise HTTPException(status_code=503, detail="No thresholds found")
+            # Warmup scenario: threshold may be legitimately unavailable in early slots.
+            event_id = str(uuid.uuid4())
+            warmup_resp = {
+                "event_id": event_id,
+                "slot_id": req.slot_id,
+                "level": "WARMUP",
+                "any_exceed": False,
+                "exceed": {k: False for k in req.values.keys()},
+                "exceed_ratio": {k: 0.0 for k in req.values.keys()},
+                "threshold_ref": {"source": "unavailable", **tmeta},
+                "evidence": {"values": {k: float(v) for k, v in req.values.items()}, "ts": req.ts},
+                "fine": None,
+            }
+            save_event(event_id, req.slot_id, "WARMUP", False, warmup_resp)
+            return warmup_resp
 
     values = {k: float(v) for k, v in req.values.items()}
     exceed, ratio = compute_exceed(values, thresholds)
