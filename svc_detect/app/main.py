@@ -89,6 +89,13 @@ def detect_eval(req: DetectRequest):
             except Exception:
                 # avoid returning 500 for optional persistence failure
                 pass
+                "exceed": {k: False for k in req.values.keys()},
+                "exceed_ratio": {k: 0.0 for k in req.values.keys()},
+                "threshold_ref": {"source": "unavailable", **tmeta},
+                "evidence": {"values": {k: float(v) for k, v in req.values.items()}, "ts": req.ts},
+                "fine": None,
+            }
+            save_event(event_id, req.slot_id, "WARMUP", False, warmup_resp)
             return warmup_resp
 
     values = {k: float(v) for k, v in req.values.items()}
