@@ -11,6 +11,16 @@ THRESHOLD_SERVICE_URL = os.getenv("THRESHOLD_SERVICE_URL", "http://127.0.0.1:800
 FINE_SERVICE_URL = os.getenv("FINE_SERVICE_URL", "http://127.0.0.1:8002")
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "5.0"))
 
+
+def _safe_values(values: dict) -> dict:
+    out = {}
+    for k, v in (values or {}).items():
+        try:
+            out[k] = float(v)
+        except Exception:
+            continue
+    return out
+
 def fetch_thresholds(node_id: str, slot_id: str | None):
     if not THRESHOLD_SERVICE_URL:
         return None, None
@@ -51,11 +61,35 @@ def detect_eval(req: DetectRequest):
             thresholds = None
 
     if not thresholds:
-        thresholds, tmeta = load_thresholds(req.slot_id)
+        try:
+            thresholds, tmeta = load_thresholds(req.slot_id)
+        except Exception as e:
+            # local fallback DB may not have legacy thresholds table.
+            thresholds, tmeta = {}, {"stale": True, "reason": f"local_threshold_load_error: {e!r}"}
+
         if thresholds:
             tmeta = {"source": "local_db", **tmeta}
         else:
-            raise HTTPException(status_code=503, detail="No thresholds found")
+            # Warmup scenario: threshold may be legitimately unavailable in early slots.
+            event_id = str(uuid.uuid4())
+            safe_vals = _safe_values(req.values)
+            warmup_resp = {
+                "event_id": event_id,
+                "slot_id": req.slot_id,
+                "level": "WARMUP",
+                "any_exceed": False,
+                "exceed": {k: False for k in safe_vals.keys()},
+                "exceed_ratio": {k: 0.0 for k in safe_vals.keys()},
+                "threshold_ref": {"source": "unavailable", **tmeta},
+                "evidence": {"values": safe_vals, "ts": req.ts},
+                "fine": None,
+            }
+            try:
+                save_event(event_id, req.slot_id, "WARMUP", False, warmup_resp)
+            except Exception:
+                # avoid returning 500 for optional persistence failure
+                pass
+            return warmup_resp
 
     values = {k: float(v) for k, v in req.values.items()}
     exceed, ratio = compute_exceed(values, thresholds)
@@ -91,5 +125,9 @@ def detect_eval(req: DetectRequest):
             resp["fine"] = fine_detect_stub(values, ratio)
 
     # 写入本地同一个 .db 文件（events 表）
-    save_event(event_id, req.slot_id, level, any_exceed, resp)
+    try:
+        save_event(event_id, req.slot_id, level, any_exceed, resp)
+    except Exception:
+        # avoid returning 500 for optional persistence failure
+        pass
     return resp

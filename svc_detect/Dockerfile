@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE}
 
 # 安装 Python3.13 + pip（容器内）
 RUN apt-get update && apt-get install -y --no-install-recommends \
