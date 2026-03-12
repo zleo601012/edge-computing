@@ -11,6 +11,16 @@ THRESHOLD_SERVICE_URL = os.getenv("THRESHOLD_SERVICE_URL", "http://127.0.0.1:800
 FINE_SERVICE_URL = os.getenv("FINE_SERVICE_URL", "http://127.0.0.1:8002")
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "5.0"))
 
+
+def _safe_values(values: dict) -> dict:
+    out = {}
+    for k, v in (values or {}).items():
+        try:
+            out[k] = float(v)
+        except Exception:
+            continue
+    return out
+
 def fetch_thresholds(node_id: str, slot_id: str | None):
     if not THRESHOLD_SERVICE_URL:
         return None, None
@@ -62,11 +72,23 @@ def detect_eval(req: DetectRequest):
         else:
             # Warmup scenario: threshold may be legitimately unavailable in early slots.
             event_id = str(uuid.uuid4())
+            safe_vals = _safe_values(req.values)
             warmup_resp = {
                 "event_id": event_id,
                 "slot_id": req.slot_id,
                 "level": "WARMUP",
                 "any_exceed": False,
+                "exceed": {k: False for k in safe_vals.keys()},
+                "exceed_ratio": {k: 0.0 for k in safe_vals.keys()},
+                "threshold_ref": {"source": "unavailable", **tmeta},
+                "evidence": {"values": safe_vals, "ts": req.ts},
+                "fine": None,
+            }
+            try:
+                save_event(event_id, req.slot_id, "WARMUP", False, warmup_resp)
+            except Exception:
+                # avoid returning 500 for optional persistence failure
+                pass
                 "exceed": {k: False for k in req.values.keys()},
                 "exceed_ratio": {k: 0.0 for k in req.values.keys()},
                 "threshold_ref": {"source": "unavailable", **tmeta},
@@ -110,5 +132,9 @@ def detect_eval(req: DetectRequest):
             resp["fine"] = fine_detect_stub(values, ratio)
 
     # 写入本地同一个 .db 文件（events 表）
-    save_event(event_id, req.slot_id, level, any_exceed, resp)
+    try:
+        save_event(event_id, req.slot_id, level, any_exceed, resp)
+    except Exception:
+        # avoid returning 500 for optional persistence failure
+        pass
     return resp
