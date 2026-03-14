@@ -48,8 +48,8 @@ class State:
     # slot tracking
     active_slot: Optional[int] = None
     slot_payload_cache: Dict[int, Dict[str, Any]] = field(default_factory=dict)  # one payload per slot
-    detect_done_for_slot: Dict[int, bool] = field(default_factory=dict)
-    estimate_done_for_slot: Dict[int, bool] = field(default_factory=dict)
+    latest_payload: Optional[Dict[str, Any]] = None
+    slot_phase_done: Dict[int, Dict[str, bool]] = field(default_factory=dict)
 
     # metrics
     ewma: Dict[str, EWMA] = field(default_factory=lambda: {
