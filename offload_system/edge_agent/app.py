@@ -1,38 +1,41 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .config import load_config, Config
-from .slot import current_slot
-from .state import STATE
-from .storage import Storage
+from .config import Config, load_config
 from .local_call import LocalCaller
 from .peers import refresh_peers_loop
 from .policy import pick_target_for_fine
+from .slot import current_slot
+from .state import STATE
+from .storage import Storage
 from .uploader import uploader_loop
 
 
 cfg: Config = load_config()
 app = FastAPI(title=f"EdgeAgent-{cfg.node_id}")
+logger = logging.getLogger("edge_agent.scheduler")
 
 
 class IngestReq(BaseModel):
     payload: Dict[str, Any]
     trace_id: str = Field(default_factory=lambda: str(int(time.time() * 1000)))
-    event_time: Optional[float] = None  # offline replay can pass virtual time (seconds)
+    event_time: Optional[float] = None
 
 
 class ExecuteReq(BaseModel):
-    stage: str  # e.g. "fine"
+    stage: str
     slot: int
     payload: Dict[str, Any]
     trace_id: str
-    origin: str  # origin node_id who requested the offload
+    origin: str
 
 
 class ExecuteResp(BaseModel):
@@ -45,16 +48,110 @@ class ExecuteResp(BaseModel):
     error: str = ""
 
 
-# runtime singletons
+@dataclass
+class SlotContext:
+    slot: int
+    slot_offset_s: float
+    now_ts: float
+    payload: Optional[Dict[str, Any]]
+    payload_source: str
+
+
+PhaseHandler = Callable[[SlotContext], Awaitable[None]]
+
+
+class SlotScheduler:
+    PHASE_ORDER = ("slot_start", "slot_mid", "slot_end", "slot_finalize")
+
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.phase_hooks: Dict[str, List[PhaseHandler]] = {k: [] for k in self.PHASE_ORDER}
+
+    def register_phase(self, phase: str, handler: PhaseHandler) -> None:
+        if phase not in self.phase_hooks:
+            raise ValueError(f"unknown phase: {phase}")
+        self.phase_hooks[phase].append(handler)
+
+    async def run(self) -> None:
+        while True:
+            try:
+                await self._tick()
+            except Exception as exc:
+                logger.exception("scheduler tick failed: %s", exc)
+            await asyncio.sleep(max(0.05, self.cfg.scheduler_tick_seconds))
+
+    async def _tick(self) -> None:
+        now = time.time()
+        slot = current_slot(now, self.cfg.slot_seconds)
+        offset = now - float(slot * self.cfg.slot_seconds)
+        payload, src = await _resolve_slot_payload(slot)
+
+        async with STATE.lock:
+            STATE.active_slot = slot
+            STATE.slot_phase_done.setdefault(slot, {})
+
+        await self._run_phase_once("slot_start", slot, offset, now, payload, src)
+        await self._run_phase_once("slot_mid", slot, offset, now, payload, src)
+        if offset >= self.cfg.estimate_trigger_second:
+            await self._run_phase_once("slot_end", slot, offset, now, payload, src)
+        if offset >= (self.cfg.slot_seconds - max(0.2, self.cfg.scheduler_tick_seconds)):
+            await self._run_phase_once("slot_finalize", slot, offset, now, payload, src)
+
+        await self._trim_state(slot)
+
+    async def _run_phase_once(
+        self,
+        phase: str,
+        slot: int,
+        offset: float,
+        now_ts: float,
+        payload: Optional[Dict[str, Any]],
+        payload_source: str,
+    ) -> None:
+        async with STATE.lock:
+            slot_state = STATE.slot_phase_done.setdefault(slot, {})
+            if slot_state.get(phase, False):
+                return
+            slot_state[phase] = True
+
+        logger.info(
+            "slot=%s offset=%.3fs phase=%s payload_source=%s hooks=%s",
+            slot,
+            offset,
+            phase,
+            payload_source,
+            len(self.phase_hooks[phase]),
+        )
+
+        ctx = SlotContext(
+            slot=slot,
+            slot_offset_s=offset,
+            now_ts=now_ts,
+            payload=payload,
+            payload_source=payload_source,
+        )
+        for hook in self.phase_hooks[phase]:
+            await hook(ctx)
+
+    async def _trim_state(self, active_slot: int) -> None:
+        async with STATE.lock:
+            for old in list(STATE.slot_payload_cache.keys()):
+                if old < active_slot - 50:
+                    STATE.slot_payload_cache.pop(old, None)
+            for old in list(STATE.slot_phase_done.keys()):
+                if old < active_slot - 50:
+                    STATE.slot_phase_done.pop(old, None)
+
+
 storage = Storage(cfg.db_path, csv_dir=cfg.csv_dir)
 caller = LocalCaller(cfg)
+scheduler = SlotScheduler(cfg)
 
 
 @app.on_event("startup")
 async def _startup() -> None:
     await storage.open()
 
-    # init peers dict
     async with STATE.lock:
         for p in cfg.peers:
             if p not in STATE.peers:
@@ -62,10 +159,13 @@ async def _startup() -> None:
 
                 STATE.peers[p] = PeerState(url=p)
 
-    # background tasks
+    scheduler.register_phase("slot_start", _phase_slot_start_detect)
+    scheduler.register_phase("slot_end", _phase_slot_end_estimate)
+    scheduler.register_phase("slot_finalize", _phase_slot_finalize_log)
+
     asyncio.create_task(refresh_peers_loop(cfg), name="refresh_peers_loop")
     asyncio.create_task(uploader_loop(cfg, storage), name="uploader_loop")
-    asyncio.create_task(_worker_loop(), name="ingest_worker")
+    asyncio.create_task(scheduler.run(), name="slot_scheduler")
 
 
 @app.on_event("shutdown")
@@ -78,12 +178,12 @@ async def _shutdown() -> None:
 async def ingest(req: IngestReq) -> Dict[str, Any]:
     et = float(req.event_time) if req.event_time is not None else time.time()
     s = current_slot(et, cfg.slot_seconds)
-    item = {"slot": s, "event_time": et, "trace_id": req.trace_id, "payload": req.payload}
-    try:
-        STATE.ingest_q.put_nowait(item)
-    except asyncio.QueueFull:
-        raise HTTPException(status_code=429, detail="ingest queue full")
-    return {"accepted": True, "slot": s, "trace_id": req.trace_id, "queue_len": STATE.queue_len()}
+    payload = dict(req.payload)
+    async with STATE.lock:
+        STATE.slot_payload_cache[s] = payload
+        STATE.latest_payload = payload
+    logger.info("ingest slot=%s trace_id=%s", s, req.trace_id)
+    return {"accepted": True, "slot": s, "trace_id": req.trace_id}
 
 
 @app.post("/execute", response_model=ExecuteResp)
@@ -93,13 +193,12 @@ async def execute(req: ExecuteReq) -> ExecuteResp:
     async with STATE.lock:
         STATE.in_flight += 1
     t0 = time.perf_counter()
-    ok, result, dur_ms, err = await caller.call_fine(req.slot, req.trace_id, req.payload)
+    ok, result, _dur_ms, err = await caller.call_fine(req.slot, req.trace_id, req.payload)
     duration_ms = (time.perf_counter() - t0) * 1000.0
     async with STATE.lock:
         STATE.in_flight -= 1
         STATE.ewma["fine"].update(duration_ms)
 
-    # persist: this node executed for another origin
     await storage.insert_fine(
         slot=req.slot,
         trace_id=req.trace_id,
@@ -153,114 +252,49 @@ async def health() -> Dict[str, Any]:
     }
 
 
-# ---------------- worker loop ----------------
-
-async def _worker_loop() -> None:
-    """
-    Single worker to keep slot transitions deterministic.
-    """
-    while True:
-        item = await STATE.ingest_q.get()
-        try:
-            await _process_ingest_item(item)
-        except Exception:
-            # swallow to keep worker alive; add logs if needed
-            pass
-        finally:
-            STATE.ingest_q.task_done()
+async def _resolve_slot_payload(slot: int) -> tuple[Optional[Dict[str, Any]], str]:
+    async with STATE.lock:
+        payload = STATE.slot_payload_cache.get(slot)
+        if payload is not None:
+            return dict(payload), "current"
+        if cfg.reuse_last_payload and STATE.latest_payload is not None:
+            return dict(STATE.latest_payload), "latest"
+    return None, "none"
 
 
-async def _process_ingest_item(item: Dict[str, Any]) -> None:
-    slot = int(item["slot"])
-    event_time = float(item["event_time"])
-    trace_id = str(item["trace_id"])
-    payload = dict(item["payload"])
-
-    # special flush event: only advance slot and close previous ones
-    if payload.get("__flush__") is True:
-        await _maybe_advance_slot(slot)
+async def _phase_slot_start_detect(ctx: SlotContext) -> None:
+    if ctx.payload is None:
+        logger.warning("slot=%s phase=slot_start skip detect: no payload", ctx.slot)
         return
-
-    # slot transition: move active slot forward; estimate happens inside each slot.
-    await _maybe_advance_slot(slot)
-
-    # cache one payload for this slot (last one wins)
-    async with STATE.lock:
-        STATE.slot_payload_cache[slot] = payload
-
-    # run detect at "slot start" (first time we see this slot)
-    first = False
-    async with STATE.lock:
-        if not STATE.detect_done_for_slot.get(slot, False):
-            STATE.detect_done_for_slot[slot] = True
-            first = True
-    if first:
-        await _run_detect_and_maybe_fine(slot=slot, trace_id=trace_id, payload=payload)
-
-    # at the 4th second of each slot, estimate threshold for next slot
-    slot_offset = event_time - float(slot * cfg.slot_seconds)
-    if slot_offset >= 4.0:
-        await _maybe_run_next_slot_estimate(slot=slot, payload=payload)
+    trace_id = f"slot-start-{ctx.slot}"
+    logger.info("slot=%s phase=slot_start microservice=detect source=%s", ctx.slot, ctx.payload_source)
+    await _run_detect_and_maybe_fine(slot=ctx.slot, trace_id=trace_id, payload=ctx.payload)
 
 
-async def _maybe_advance_slot(new_slot: int) -> None:
-    """
-    Advance active slot and trim stale memory.
-
-    Baseline estimation is triggered near the end of each slot (offset >= 4s)
-    so detect at the beginning of next slot can directly read baseline(slot).
-    """
-    async with STATE.lock:
-        active = STATE.active_slot
-    if active is None:
-        async with STATE.lock:
-            STATE.active_slot = new_slot
+async def _phase_slot_end_estimate(ctx: SlotContext) -> None:
+    if ctx.payload is None:
+        logger.warning("slot=%s phase=slot_end skip estimate: no payload", ctx.slot)
         return
-    if new_slot <= active:
-        return
-
-    async with STATE.lock:
-        STATE.active_slot = new_slot
-        # optional: keep only recent cache to save memory
-        # we can delete slots < active-100 etc, but keep simple
-        # NOTE: detect_done_for_slot can also be trimmed
-        for old in list(STATE.slot_payload_cache.keys()):
-            if old < new_slot - 50:
-                STATE.slot_payload_cache.pop(old, None)
-        for old in list(STATE.detect_done_for_slot.keys()):
-            if old < new_slot - 50:
-                STATE.detect_done_for_slot.pop(old, None)
-        for old in list(STATE.estimate_done_for_slot.keys()):
-            if old < new_slot - 50:
-                STATE.estimate_done_for_slot.pop(old, None)
-
-
-async def _maybe_run_next_slot_estimate(slot: int, payload: Dict[str, Any]) -> None:
-    next_slot = slot + 1
-    should_run = False
-    async with STATE.lock:
-        if not STATE.estimate_done_for_slot.get(next_slot, False):
-            STATE.estimate_done_for_slot[next_slot] = True
-            should_run = True
-
-    if not should_run:
-        return
-
-    await _run_estimate(slot=next_slot, payload=payload)
+    next_slot = ctx.slot + 1
+    logger.info("slot=%s phase=slot_end microservice=estimate target_slot=%s source=%s", ctx.slot, next_slot, ctx.payload_source)
+    await _run_estimate(slot=next_slot, payload=ctx.payload)
     STATE.upload_event.set()
+
+
+async def _phase_slot_finalize_log(ctx: SlotContext) -> None:
+    logger.info("slot=%s phase=slot_finalize offset=%.3fs", ctx.slot, ctx.slot_offset_s)
 
 
 async def _run_estimate(slot: int, payload: Dict[str, Any]) -> None:
     async with STATE.lock:
         STATE.in_flight += 1
     t0 = time.perf_counter()
-    ok, result, dur_ms, err = await caller.call_estimate(slot, trace_id=f"est-{slot}", payload=payload)
+    ok, result, _dur_ms, err = await caller.call_estimate(slot, trace_id=f"est-{slot}", payload=payload)
     duration_ms = (time.perf_counter() - t0) * 1000.0
     async with STATE.lock:
         STATE.in_flight -= 1
         STATE.ewma["estimate"].update(duration_ms)
 
-    # store baseline no matter ok (so downstream has something to read)
     await storage.upsert_baseline(slot=slot, trace_id=f"est-{slot}", payload=(result if ok else {"error": err, "result": result}))
 
 
@@ -269,7 +303,7 @@ async def _run_detect_and_maybe_fine(slot: int, trace_id: str, payload: Dict[str
     async with STATE.lock:
         STATE.in_flight += 1
     t0 = time.perf_counter()
-    ok, result, dur_ms, err = await caller.call_detect(slot, trace_id=trace_id, payload=payload, baseline=baseline)
+    ok, result, _dur_ms, err = await caller.call_detect(slot, trace_id=trace_id, payload=payload, baseline=baseline)
     duration_ms = (time.perf_counter() - t0) * 1000.0
     async with STATE.lock:
         STATE.in_flight -= 1
@@ -277,29 +311,23 @@ async def _run_detect_and_maybe_fine(slot: int, trace_id: str, payload: Dict[str
 
     abnormal = False
     if ok:
-        # support both conventions:
-        # - {"abnormal": true/false}
-        # - {"any_exceed": true/false} (svc_detect)
         abnormal = bool(result.get("abnormal", result.get("any_exceed", False)))
     else:
-        # if detect fails, mark abnormal=false but persist error
         result = {"error": err, "result": result}
-        abnormal = False
 
     await storage.upsert_detect(slot=slot, trace_id=trace_id, abnormal=abnormal, payload=result)
 
     if abnormal:
+        logger.info("slot=%s phase=slot_start microservice=fine abnormal=true", slot)
         await _run_fine_with_offload(slot=slot, trace_id=trace_id, payload=payload)
 
 
 async def _run_fine_with_offload(slot: int, trace_id: str, payload: Dict[str, Any]) -> None:
-    # snapshot peers
     async with STATE.lock:
         peers_snapshot = dict(STATE.peers)
 
     target = pick_target_for_fine(peers_snapshot)
     if target:
-        # try remote first
         async with STATE.lock:
             STATE.in_flight += 1
         t0 = time.perf_counter()
@@ -329,7 +357,6 @@ async def _run_fine_with_offload(slot: int, trace_id: str, payload: Dict[str, An
             )
             return
 
-        # remote failed -> fall back local
         await storage.insert_fine(
             slot=slot,
             trace_id=trace_id,
@@ -341,7 +368,6 @@ async def _run_fine_with_offload(slot: int, trace_id: str, payload: Dict[str, An
             payload={"error": err, "result": result},
         )
 
-    # local fine
     async with STATE.lock:
         STATE.in_flight += 1
     t0 = time.perf_counter()
