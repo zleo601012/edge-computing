@@ -106,14 +106,23 @@ class LocalCaller:
         return await self._post(self.cfg.est_url, data)
 
     async def call_detect(self, slot: int, trace_id: str, payload: Dict[str, Any], baseline: Optional[Dict[str, Any]]) -> Tuple[bool, Dict[str, Any], float, str]:
-        _ = baseline  # kept for compatibility with other detect implementations
         values = self._extract_values(payload)
+
+        baseline_thresholds = None
+        if isinstance(baseline, dict):
+            raw_thr = baseline.get("thresholds")
+            if isinstance(raw_thr, dict):
+                baseline_thresholds = raw_thr
+
         data = {
             "node_id": str(payload.get("node_id") or self.cfg.node_id),
             "slot_id": str(slot),
             "ts": self._normalize_ts(payload.get("ts")),
             "values": values,
         }
+        if baseline_thresholds is not None:
+            data["baseline_thresholds"] = baseline_thresholds
+
         return await self._post(self.cfg.det_url, data)
 
     async def call_fine(self, slot: int, trace_id: str, payload: Dict[str, Any]) -> Tuple[bool, Dict[str, Any], float, str]:

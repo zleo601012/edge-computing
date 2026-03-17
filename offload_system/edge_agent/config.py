@@ -68,6 +68,9 @@ class Config:
     # loops
     peer_refresh_seconds: float
     uploader_check_seconds: float
+    scheduler_tick_seconds: float
+    estimate_trigger_second: float
+    reuse_last_payload: bool
 
     @property
     def collector_upload_url(self) -> str:
@@ -75,6 +78,9 @@ class Config:
 
 
 def load_config() -> Config:
+    reuse_last_payload_raw = _env_str("REUSE_LAST_PAYLOAD", "1").strip().lower()
+    reuse_last_payload = reuse_last_payload_raw in {"1", "true", "yes", "on"}
+
     return Config(
         node_id=_env_str("NODE_ID", "node-unknown"),
         node_type=_env_str("NODE_TYPE", "pi").lower(),
@@ -92,4 +98,7 @@ def load_config() -> Config:
         execute_timeout_s=_env_float("EXECUTE_TIMEOUT", 1.0),
         peer_refresh_seconds=_env_float("PEER_REFRESH_SECONDS", 2.0),
         uploader_check_seconds=_env_float("UPLOADER_CHECK_SECONDS", 2.0),
+        scheduler_tick_seconds=_env_float("SCHEDULER_TICK_SECONDS", 0.25),
+        estimate_trigger_second=_env_float("ESTIMATE_TRIGGER_SECOND", 4.0),
+        reuse_last_payload=reuse_last_payload,
     )
