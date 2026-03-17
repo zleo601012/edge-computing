@@ -9,6 +9,10 @@ class DetectRequest(BaseModel):
     slot_id: Optional[str] = Field(default=None, description="当前时隙ID，例如 t_101（用于精确取阈值）")
     ts: Optional[float] = Field(default=None, description="时间戳（可选）")
     values: Dict[str, MetricValue] = Field(description="水质观测值，例如 {'COD':80,'pH':7.1}")
+    baseline_thresholds: Optional[Dict[str, object]] = Field(
+        default=None,
+        description="可选：由边缘节点估计阶段传来的阈值快照，用于阈值服务不可达时回退",
+    )
 
 class DetectResponse(BaseModel):
     event_id: str

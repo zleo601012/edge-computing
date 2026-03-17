@@ -71,6 +71,10 @@ def detect_eval(req: DetectRequest) -> Dict[str, object]:
         except Exception:
             thresholds = None
 
+    if not thresholds and isinstance(req.baseline_thresholds, dict) and req.baseline_thresholds:
+        thresholds = req.baseline_thresholds
+        tmeta = {"source": "edge_baseline", "stale": False}
+
     if not thresholds:
         try:
             thresholds, tmeta = load_thresholds(req.slot_id)
